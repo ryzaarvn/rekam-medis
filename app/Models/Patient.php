@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 class Patient extends Model
 {
@@ -89,5 +90,13 @@ class Patient extends Model
     public function authorizedDoctors(): BelongsToMany
     {
         return $this->doctors()->wherePivot('is_authorized', true);
+    }
+
+    /**
+     * Get the blockchain audit logs associated with the patient's medical records.
+     */
+    public function logBlockchains(): HasManyThrough
+    {
+        return $this->hasManyThrough(LogBlockchain::class, MedicalRecord::class);
     }
 }

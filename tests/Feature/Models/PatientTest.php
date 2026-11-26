@@ -2,6 +2,7 @@
 
 use App\Models\Authorization;
 use App\Models\Doctor;
+use App\Models\LogBlockchain;
 use App\Models\MedicalRecord;
 use App\Models\Patient;
 use App\Models\User;
@@ -76,6 +77,14 @@ it('casts date of birth to a date instance and resolves authorized doctors and r
         'treatment' => 'Sumatriptan',
         'current_hash' => '0x'.str_repeat('3', 64),
     ]);
+    $blockchainLog = LogBlockchain::create([
+        'medical_record_id' => $record->id,
+        'doctor_id' => $authorizedDoctor->id,
+        'onchain_hash' => '0x'.str_repeat('3', 64),
+        'tx_hash' => '0x'.str_repeat('4', 64),
+        'block_number' => 7000150,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
 
     expect($patient->date_of_birth)->toBeInstanceOf(DateTimeInterface::class)
         ->and($patient->date_of_birth->toDateString())->toBe('1995-08-17');
@@ -86,5 +95,7 @@ it('casts date of birth to a date instance and resolves authorized doctors and r
     expect($patient->authorizations)->toHaveCount(2);
     expect($patient->medicalRecords)->toHaveCount(1)
         ->and($patient->medicalRecords->first()->is($record))->toBeTrue();
+    expect($patient->logBlockchains)->toHaveCount(1)
+        ->and($patient->logBlockchains->first()->is($blockchainLog))->toBeTrue();
     expect(CarbonImmutable::instance($patient->date_of_birth)->year)->toBe(1995);
 });
