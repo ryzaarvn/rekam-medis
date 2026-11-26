@@ -101,6 +101,19 @@ class User extends Authenticatable
     }
 
     /**
+     * Resolve the default named dashboard route for the user's role.
+     */
+    public function dashboardRoute(): string
+    {
+        return match ($this->role) {
+            self::ROLE_ADMIN => 'admin.dashboard',
+            self::ROLE_DOKTER => 'dokter.dashboard',
+            self::ROLE_PASIEN => 'pasien.dashboard',
+            default => 'login',
+        };
+    }
+
+    /**
      * Get the doctor profile associated with the user.
      */
     public function doctor(): HasOne

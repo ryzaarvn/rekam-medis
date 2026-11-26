@@ -194,28 +194,42 @@ export async function getReadOnlyContract({
     return new ethers.Contract(resolvedAddress, healthcareRecordAbi, activeProvider);
 }
 
+// ===== Contract Execution Helper =====
+
+async function executeContractWrite(invoker, options = {}) {
+    options.onStage?.('metamask');
+    const { contract } = await getWritableContract(options);
+    const tx = await invoker(contract);
+    options.onStage?.('sepolia', tx.hash);
+    const receipt = await tx.wait();
+
+    return normalizeTransactionReceipt(receipt);
+}
+
 // ===== Admin Functions =====
 
 export async function addDoctor(doctorAddress, options = {}) {
     const normalizedDoctor = normalizeAddress(doctorAddress);
-    const { contract } = await getWritableContract(options);
-    const tx = await contract.addDoctor(normalizedDoctor);
-    const receipt = await tx.wait();
+    const receipt = await executeContractWrite(
+        (contract) => contract.addDoctor(normalizedDoctor),
+        options,
+    );
 
     return {
-        ...normalizeTransactionReceipt(receipt),
+        ...receipt,
         doctorAddress: normalizedDoctor,
     };
 }
 
 export async function removeDoctor(doctorAddress, options = {}) {
     const normalizedDoctor = normalizeAddress(doctorAddress);
-    const { contract } = await getWritableContract(options);
-    const tx = await contract.removeDoctor(normalizedDoctor);
-    const receipt = await tx.wait();
+    const receipt = await executeContractWrite(
+        (contract) => contract.removeDoctor(normalizedDoctor),
+        options,
+    );
 
     return {
-        ...normalizeTransactionReceipt(receipt),
+        ...receipt,
         doctorAddress: normalizedDoctor,
     };
 }
@@ -224,24 +238,26 @@ export async function removeDoctor(doctorAddress, options = {}) {
 
 export async function grantAccess(doctorAddress, options = {}) {
     const normalizedDoctor = normalizeAddress(doctorAddress);
-    const { contract } = await getWritableContract(options);
-    const tx = await contract.grantAccess(normalizedDoctor);
-    const receipt = await tx.wait();
+    const receipt = await executeContractWrite(
+        (contract) => contract.grantAccess(normalizedDoctor),
+        options,
+    );
 
     return {
-        ...normalizeTransactionReceipt(receipt),
+        ...receipt,
         doctorAddress: normalizedDoctor,
     };
 }
 
 export async function revokeAccess(doctorAddress, options = {}) {
     const normalizedDoctor = normalizeAddress(doctorAddress);
-    const { contract } = await getWritableContract(options);
-    const tx = await contract.revokeAccess(normalizedDoctor);
-    const receipt = await tx.wait();
+    const receipt = await executeContractWrite(
+        (contract) => contract.revokeAccess(normalizedDoctor),
+        options,
+    );
 
     return {
-        ...normalizeTransactionReceipt(receipt),
+        ...receipt,
         doctorAddress: normalizedDoctor,
     };
 }
@@ -252,12 +268,13 @@ export async function addMedicalRecord(recordCode, patientAddress, recordHash, o
     const recordId = encodeRecordId(recordCode);
     const normalizedPatient = normalizeAddress(patientAddress);
     const normalizedHash = normalizeBytes32(recordHash);
-    const { contract } = await getWritableContract(options);
-    const tx = await contract.addMedicalRecord(recordId, normalizedPatient, normalizedHash);
-    const receipt = await tx.wait();
+    const receipt = await executeContractWrite(
+        (contract) => contract.addMedicalRecord(recordId, normalizedPatient, normalizedHash),
+        options,
+    );
 
     return {
-        ...normalizeTransactionReceipt(receipt),
+        ...receipt,
         recordId,
         patientAddress: normalizedPatient,
         recordHash: normalizedHash,
@@ -268,12 +285,13 @@ export async function addMedicalRecord(recordCode, patientAddress, recordHash, o
 export async function updateMedicalRecord(recordCode, newRecordHash, options = {}) {
     const recordId = encodeRecordId(recordCode);
     const normalizedHash = normalizeBytes32(newRecordHash);
-    const { contract } = await getWritableContract(options);
-    const tx = await contract.updateMedicalRecord(recordId, normalizedHash);
-    const receipt = await tx.wait();
+    const receipt = await executeContractWrite(
+        (contract) => contract.updateMedicalRecord(recordId, normalizedHash),
+        options,
+    );
 
     return {
-        ...normalizeTransactionReceipt(receipt),
+        ...receipt,
         recordId,
         recordHash: normalizedHash,
         actionType: 'UPDATE',

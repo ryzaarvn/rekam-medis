@@ -1,0 +1,466 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+:root {
+    --primary-teal: #0f766e;
+    --primary-dark: #115e59;
+    --sidebar-bg: #2f353b;
+    --sidebar-hover: #23282d;
+    --bg-content: #f3f6f8;
+    --dark-bg: #0f172a;
+    --text-dark: #1e293b;
+    --text-light: #f8fafc;
+    --border-dark: #334155;
+}
+
+body,
+html {
+    margin: 0;
+    padding: 0;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: var(--bg-content);
+    color: var(--text-dark);
+    overflow-x: hidden;
+}
+
+/* =========================================================
+   1. STYLING HALAMAN LOGIN & REGISTER (SPLIT SCREEN GELAP)
+   ========================================================= */
+.auth-container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    background-color: var(--dark-bg);
+}
+
+.auth-banner {
+    width: 60%;
+    background: linear-gradient(rgba(15, 118, 110, 0.4), rgba(15, 23, 42, 0.85)),
+        url('https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?q=80&w=1453&auto=format&fit=crop') no-repeat center center;
+    background-size: cover;
+    color: #ffffff;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 60px;
+    position: relative;
+}
+
+.auth-banner::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(135deg, rgba(15, 118, 110, 0.3) 0%, rgba(15, 23, 42, 0.6) 100%);
+    z-index: 1;
+}
+
+.auth-banner-content {
+    position: relative;
+    z-index: 2;
+    max-width: 680px;
+}
+
+.auth-banner h1 {
+    font-size: 2.8rem;
+    font-weight: 800;
+    line-height: 1.2;
+    margin-bottom: 16px;
+    letter-spacing: -0.02em;
+}
+
+.auth-banner p {
+    font-size: 1.15rem;
+    opacity: 0.9;
+    font-weight: 500;
+}
+
+.auth-panel {
+    width: 40%;
+    background-color: var(--dark-bg);
+    color: var(--text-light);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 50px 60px 30px;
+    overflow-y: auto;
+}
+
+.auth-panel-body {
+    max-width: 440px;
+    width: 100%;
+    margin: auto;
+}
+
+.auth-panel .form-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.auth-panel .text-muted {
+    color: #cbd5e1 !important;
+}
+
+.form-control-dark {
+    background-color: #1e293b;
+    border: 1px solid var(--border-dark);
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 0.92rem;
+}
+
+.form-control-dark::placeholder {
+    color: #94a3b8 !important;
+    opacity: 1;
+}
+
+.form-control-dark:focus {
+    background-color: #1e293b;
+    border-color: var(--primary-teal);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.25);
+    color: #ffffff;
+}
+
+.btn-auth {
+    background-color: var(--primary-teal);
+    border: none;
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.btn-auth:hover {
+    background-color: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.auth-link {
+    color: #38bdf8;
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.auth-link:hover {
+    color: #7dd3fc;
+}
+
+.auth-footer {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-align: center;
+    border-top: 1px solid #1e293b;
+    padding-top: 20px;
+    margin-top: 30px;
+}
+
+@media (max-width: 1024px) {
+    .auth-container {
+        min-height: 100vh;
+        height: auto;
+        overflow-y: auto;
+    }
+
+    .auth-banner {
+        display: none;
+    }
+
+    .auth-panel {
+        width: 100%;
+        min-height: 100vh;
+        padding: 32px 24px;
+    }
+}
+
+/* =========================================================
+   2. STYLING HALAMAN DASHBOARD (SIDEBAR, GRID MEDIS & TABEL)
+   ========================================================= */
+.app-wrapper {
+    display: flex;
+    min-height: 100vh;
+}
+
+.sidebar {
+    width: 240px;
+    background-color: var(--sidebar-bg);
+    color: #b8c7ce;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    transition: margin-left 0.2s ease;
+}
+
+.sidebar.collapsed {
+    margin-left: -240px;
+}
+
+.sidebar-brand {
+    height: 54px;
+    background-color: var(--primary-dark);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.5px;
+}
+
+.sidebar-menu {
+    list-style: none;
+    padding: 12px 0;
+    margin: 0;
+}
+
+.sidebar-menu li a,
+.sidebar-menu li button.sidebar-logout-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 20px;
+    color: #b8c7ce;
+    text-decoration: none;
+    font-size: 0.9rem;
+    border: none;
+    border-left: 3px solid transparent;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sidebar-menu li a:hover,
+.sidebar-menu li button.sidebar-logout-btn:hover {
+    background-color: var(--sidebar-hover);
+    color: #ffffff;
+}
+
+.sidebar-menu li a.active {
+    background-color: var(--primary-teal);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* Area Kanan dengan Latar Belakang Pola Medis & Grid yang Simetris */
+.main-panel {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+    background-color: var(--bg-content);
+    background-image:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cg fill='%230f766e' fill-opacity='0.08'%3E%3Cpath d='M30 15 h10 v10 h10 v10 h-10 v10 h-10 v-10 h-10 v-10 h10 z'/%3E%3Cpath d='M110 95 h10 v10 h10 v10 h-10 v10 h-10 v-10 h-10 v-10 h10 z'/%3E%3Cpath d='M25 110 q 5 -10, 10 -10 t 10 10 t 10 -10 t 10 10' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-opacity='0.08'/%3E%3Cpath d='M105 30 q 5 -10, 10 -10 t 10 10 t 10 -10 t 10 10' fill='none' stroke='%230f766e' stroke-width='2.5' stroke-opacity='0.08'/%3E%3Crect x='130' y='130' width='15' height='6' rx='3' transform='rotate(-45 137 133)'/%3E%3Crect x='50' y='50' width='15' height='6' rx='3' transform='rotate(-45 57 53)'/%3E%3C/g%3E%3C/svg%3E"),
+        linear-gradient(to right, rgba(15, 118, 110, 0.05) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(15, 118, 110, 0.05) 1px, transparent 1px);
+    background-repeat: repeat, repeat, repeat;
+    background-size: 160px 160px, 40px 40px, 40px 40px;
+    background-position: center;
+}
+
+.topbar {
+    min-height: 54px;
+    background-color: var(--primary-teal);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 24px;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.content-area {
+    padding: 24px;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.page-title {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-dark);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.panel-card {
+    background: #ffffff;
+    border-radius: 4px;
+    border-top: 3px solid var(--primary-teal);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    background: #ffffff;
+    border-radius: 4px;
+    border-top: 3px solid var(--primary-teal);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    padding: 18px 20px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.stat-card-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 8px;
+    background-color: #f0fdfa;
+    color: var(--primary-teal);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    flex-shrink: 0;
+}
+
+.stat-card-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--text-dark);
+    line-height: 1.1;
+}
+
+.stat-card-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 4px;
+}
+
+.table-custom thead th {
+    background-color: var(--primary-teal);
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 0.88rem;
+    border: none;
+    padding: 11px 14px;
+    white-space: nowrap;
+}
+
+.table-custom tbody td {
+    padding: 10px 14px;
+    vertical-align: middle;
+    font-size: 0.88rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.table-custom tbody tr:nth-child(even) {
+    background-color: #f8fafc;
+}
+
+.btn-icon {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.btn-primary {
+    background-color: var(--primary-teal);
+    border-color: var(--primary-teal);
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-dark);
+    border-color: var(--primary-dark);
+}
+
+.hash-code {
+    font-family: monospace;
+    background-color: #f0fdfa;
+    color: var(--primary-teal);
+    border: 1px solid #ccfbf1;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    word-break: break-all;
+}
+
+.wallet-status-pill {
+    background-color: rgba(15, 23, 42, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Penyesuaian khusus agar lebih ramah dibaca dokter senior */
+.elder-form .form-label {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 6px;
+}
+
+.elder-form .form-control,
+.elder-form .form-select {
+    font-size: 1rem;
+    padding: 12px 14px;
+    border: 1.5px solid #94a3b8;
+    border-radius: 8px;
+}
+
+.elder-form .form-control:focus,
+.elder-form .form-select:focus {
+    border-color: #0f766e;
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
+.quick-chip {
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #334155;
+    transition: all 0.15s;
+}
+
+.quick-chip:hover {
+    background: #0f766e;
+    color: #ffffff;
+    border-color: #0f766e;
+}
+
+@media (max-width: 991.98px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 1045;
+        margin-left: -240px;
+    }
+
+    .sidebar.mobile-open {
+        margin-left: 0;
+    }
+}

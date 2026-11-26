@@ -32,6 +32,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Admin Wallet Address
+    |--------------------------------------------------------------------------
+    |
+    | Ethereum Sepolia wallet address of the smart contract administrator
+    | normalized to lowercase to match PostgreSQL check constraints.
+    |
+    */
+
+    'admin_wallet_address' => strtolower(trim((string) env('ADMIN_WALLET_ADDRESS', ''))),
+
+    /*
+    |--------------------------------------------------------------------------
     | Sepolia JSON-RPC Endpoint
     |--------------------------------------------------------------------------
     |

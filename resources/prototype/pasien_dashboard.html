@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pasien - Sistem Rekam Medis Blockchain</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../static/css/style.css">
+</head>
+
+<body>
+    <div class="app-wrapper">
+        <!-- Sidebar Kiri dengan Navigasi Tab Aktif -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">E-REKAM MEDIS</div>
+            <ul class="sidebar-menu">
+                <li>
+                    <a href="#" id="menu-riwayat" class="active" onclick="switchPasienTab('riwayat', this)">
+                        <i class="bi bi-file-medical"></i> Riwayat & Verifikasi
+                    </a>
+                </li>
+                <li>
+                    <a href="#" id="menu-otorisasi" onclick="switchPasienTab('otorisasi', this)">
+                        <i class="bi bi-shield-lock"></i> Pengelolaan Izin Dokter
+                    </a>
+                </li>
+                <li><a href="login.html"><i class="bi bi-box-arrow-left"></i> Logout</a></li>
+            </ul>
+        </aside>
+
+        <div class="main-panel">
+            <header class="topbar">
+                <div><i class="bi bi-list fs-5"></i></div>
+                <div class="small fw-semibold"><i class="bi bi-person-circle me-1"></i> Budi Santoso (PAT001)</div>
+            </header>
+
+            <main class="content-area">
+                <!-- ====================================================
+                     TAB 1: RIWAYAT REKAM MEDIS & TAMPILAN HASIL VERIFIKASI
+                     ==================================================== -->
+                <div id="tab-riwayat">
+                    <div class="page-header">
+                        <h1 class="page-title"><i class="bi bi-file-medical"></i> Riwayat & Verifikasi Integritas Rekam
+                            Medis</h1>
+                    </div>
+
+                    <div class="panel-card">
+                        <!-- Tampilan Hasil Verifikasi: VALID -->
+                        <div id="verif-valid" class="alert alert-success d-none" role="alert">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-patch-check-fill fs-4 me-3"></i>
+                                <div>
+                                    <strong>Rekam Medis Terverifikasi (VALID)</strong><br>
+                                    <span class="small">Hash SHA-256 data off-chain cocok dengan bukti hash yang
+                                        tercatat di Blockchain. Data asli dan tidak dimanipulasi.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tampilan Hasil Verifikasi: TIDAK VALID / DIMANIPULASI -->
+                        <div id="verif-invalid" class="alert alert-danger d-none" role="alert">
+                            <div class="d-flex align-items-start">
+                                <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
+                                <div>
+                                    <strong>PERINGATAN! Integritas Data Tidak Cocok (Dimodifikasi)</strong><br>
+                                    <span class="small d-block mb-2">Isi rekam medis di database tidak sesuai dengan
+                                        catatan asli di Blockchain!</span>
+                                    <div class="bg-white text-dark p-2 rounded border small">
+                                        <div><strong>Hash On-Chain:</strong> <span
+                                                class="hash-code">a1b2c3d4e5f67890abcdef1234567890...9988</span></div>
+                                        <div class="mt-1"><strong>Hash Saat Ini:</strong> <span
+                                                class="hash-code text-danger border-danger">9988ff77ee66554433221100ffeeddcc...1122</span>
+                                        </div>
+                                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> Dr. Andi Wijaya
+                                            (DOC001)</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-custom">
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>ID Rekam</th>
+                                        <th>Tanggal</th>
+                                        <th>Dokter</th>
+                                        <th>Diagnosis</th>
+                                        <th>Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>1.</td>
+                                        <td><strong>MR001</strong></td>
+                                        <td>2026-11-10</td>
+                                        <td>Dr. Andi Wijaya (DOC001)</td>
+                                        <td>Demam</td>
+                                        <td>
+                                            <button type="button" class="btn btn-info btn-sm text-white me-1"
+                                                data-bs-toggle="modal" data-bs-target="#modalDetailMR001">
+                                                <i class="bi bi-eye"></i> Detail
+                                            </button>
+                                            <button type="button" class="btn btn-success btn-sm"
+                                                onclick="verifikasiRekamMedis('MR001', true)">
+                                                <i class="bi bi-shield-check"></i> Verifikasi
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td>2.</td>
+                                        <td><strong>MR002</strong></td>
+                                        <td>2026-11-15</td>
+                                        <td>Dr. Andi Wijaya (DOC001)</td>
+                                        <td>Infeksi Saluran Pernapasan <span class="badge bg-warning text-dark">Uji
+                                                Manipulasi</span></td>
+                                        <td>
+                                            <button type="button" class="btn btn-info btn-sm text-white me-1"
+                                                data-bs-toggle="modal" data-bs-target="#modalDetailMR001">
+                                                <i class="bi bi-eye"></i> Detail
+                                            </button>
+                                            <button type="button" class="btn btn-danger btn-sm"
+                                                onclick="verifikasiRekamMedis('MR002', false)">
+                                                <i class="bi bi-shield-exclamation"></i> Verifikasi
+                                            </button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================================
+                     TAB 2: PENGELOLAAN IZIN AKSES DOKTER
+                     ==================================================== -->
+                <div id="tab-otorisasi" class="d-none">
+                    <div class="page-header">
+                        <h1 class="page-title"><i class="bi bi-shield-lock"></i> Pengelolaan Izin Akses Dokter</h1>
+                    </div>
+
+                    <div class="panel-card">
+                        <p class="text-muted small mb-3">
+                            Centang dokter yang Anda izinkan untuk melihat dan menambahkan rekam medis. Perubahan izin
+                            akan dikirim ke Smart Contract (<code>grantAccess</code> / <code>revokeAccess</code>).
+                        </p>
+                        <div id="auth-alert" class="alert alert-success d-none"></div>
+
+                        <form id="authForm">
+                            <div class="table-responsive">
+                                <table class="table table-custom">
+                                    <thead>
+                                        <tr>
+                                            <th>No</th>
+                                            <th>Status Izin</th>
+                                            <th>ID Dokter</th>
+                                            <th>Nama Dokter</th>
+                                            <th>Spesialis</th>
+                                            <th>Alamat Wallet</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>1.</td>
+                                            <td>
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" name="doctor_ids"
+                                                        value="DOC001" checked>
+                                                    <label
+                                                        class="form-check-label small fw-semibold text-success">Diizinkan</label>
+                                                </div>
+                                            </td>
+                                            <td>DOC001</td>
+                                            <td>Dr. Andi Wijaya</td>
+                                            <td>Umum</td>
+                                            <td><span
+                                                    class="hash-code">0x71C7656EC7ab88b098defB751B7401B5f6d8976F</span>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td>2.</td>
+                                            <td>
+                                                <div class="form-check form-switch">
+                                                    <input class="form-check-input" type="checkbox" name="doctor_ids"
+                                                        value="DOC002">
+                                                    <label class="form-check-label small text-muted">Tidak
+                                                        Diizinkan</label>
+                                                </div>
+                                            </td>
+                                            <td>DOC002</td>
+                                            <td>Dr. Rina Kusuma</td>
+                                            <td>Penyakit Dalam</td>
+                                            <td><span
+                                                    class="hash-code">0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC</span>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm mt-2">
+                                <i class="bi bi-check-circle me-1"></i> Simpan Pengaturan Izin
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Modal Detail Isi Rekam Medis (Sesuai Data Contoh Laporan Progress 1) -->
+    <div class="modal fade" id="modalDetailMR001" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h6 class="modal-title fw-bold">Detail Rekam Medis (MR001)</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body small">
+                    <p><strong>Tanggal Pemeriksaan:</strong> 2026-11-10</p>
+                    <p><strong>Dokter Pemeriksa:</strong> Dr. Andi Wijaya (DOC001)</p>
+                    <hr>
+                    <p><strong>Keluhan (Complaint):</strong><br>Demam dan sakit kepala</p>
+                    <p><strong>Diagnosis:</strong><br>Demam</p>
+                    <p><strong>Tindakan (Treatment):</strong><br>Istirahat dan pemeriksaan lanjutan</p>
+                    <p><strong>Catatan Dokter (Notes):</strong><br>Kontrol kembali jika keluhan berlanjut</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="../static/js/main.js"></script>
+    <script>
+        // Script pindah menu sidebar pada halaman Pasien
+        function switchPasienTab(tabName, element) {
+            document.getElementById('tab-riwayat').classList.add('d-none');
+            document.getElementById('tab-otorisasi').classList.add('d-none');
+            document.getElementById('tab-' + tabName).classList.remove('d-none');
+
+            document.querySelectorAll('.sidebar-menu a').forEach(a => a.classList.remove('active'));
+            element.classList.add('active');
+        }
+    </script>
+</body>
+
+</html>

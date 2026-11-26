@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Sistem Rekam Medis Blockchain</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="../static/css/style.css">
+</head>
+
+<body>
+    <div class="app-wrapper">
+        <!-- Sidebar Kiri dengan Navigasi Interaktif -->
+        <aside class="sidebar">
+            <div class="sidebar-brand">E-REKAM MEDIS</div>
+            <ul class="sidebar-menu">
+                <li>
+                    <a href="#" id="nav-akun" onclick="switchAdminTab('akun', this)">
+                        <i class="bi bi-person-plus"></i> Daftarkan Akun
+                    </a>
+                </li>
+                <li>
+                    <a href="#" id="nav-dokter" class="active" onclick="switchAdminTab('dokter', this)">
+                        <i class="bi bi-person-badge"></i> Data Dokter
+                    </a>
+                </li>
+                <li>
+                    <a href="#" id="nav-pasien" onclick="switchAdminTab('pasien', this)">
+                        <i class="bi bi-people"></i> Data Pasien
+                    </a>
+                </li>
+                <li><a href="login.html"><i class="bi bi-box-arrow-left"></i> Logout</a></li>
+            </ul>
+        </aside>
+
+        <!-- Area Kanan -->
+        <div class="main-panel">
+            <header class="topbar">
+                <div><i class="bi bi-list fs-5"></i></div>
+                <div class="small fw-semibold"><i class="bi bi-person-circle me-1"></i> Admin <i
+                        class="bi bi-caret-down-fill ms-1"></i></div>
+            </header>
+
+            <main class="content-area">
+                <div id="admin-alert" class="alert d-none"></div>
+
+                <!-- ====================================================
+                     TAB 1: DAFTARKAN AKUN (DOKTER / PASIEN)
+                     ==================================================== -->
+                <div id="tab-akun" class="d-none">
+                    <div class="page-header">
+                        <h1 class="page-title"><i class="bi bi-person-plus"></i> Daftarkan Akun Baru</h1>
+                    </div>
+
+                    <div class="panel-card">
+                        <p class="text-muted small mb-3">
+                            Daftarkan kredensial login dan alamat wallet Ethereum untuk Dokter atau Pasien baru.
+                        </p>
+                        <form id="registerForm">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-semibold">Role Pengguna</label>
+                                    <select name="role" class="form-select">
+                                        <option value="dokter">Dokter</option>
+                                        <option value="pasien">Pasien</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-semibold">Username</label>
+                                    <input type="text" name="username" class="form-control"
+                                        placeholder="Masukkan username unik">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-semibold">Password</label>
+                                    <input type="password" name="password" class="form-control"
+                                        placeholder="Masukkan password">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label small fw-semibold">Alamat Wallet Ethereum (Hardhat)</label>
+                                    <input type="text" name="wallet_address" class="form-control"
+                                        placeholder="Contoh: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary mt-3">
+                                <i class="bi bi-check-circle me-1"></i> Daftarkan Akun
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- ====================================================
+                     TAB 2: DATA DOKTER (TAMBAH, EDIT, HAPUS)
+                     ==================================================== -->
+                <div id="tab-dokter">
+                    <div class="page-header">
+                        <h1 class="page-title"><i class="bi bi-person-badge"></i> Data Dokter</h1>
+                        <button class="btn btn-success btn-sm fw-semibold" onclick="bukaModalDokter('tambah')">
+                            <i class="bi bi-plus-lg"></i> Tambah Data Dokter
+                        </button>
+                    </div>
+
+                    <div class="panel-card">
+                        <div class="table-responsive">
+                            <table class="table table-custom mb-2" id="tabelDokter">
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>ID Dokter</th>
+                                        <th>Nama Dokter</th>
+                                        <th>Spesialis</th>
+                                        <th>No. STR</th>
+                                        <th>Alamat Wallet</th>
+                                        <th>Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr id="row-DOC001">
+                                        <td>1.</td>
+                                        <td>DOC001</td>
+                                        <td class="col-nama">Dr. Andi Wijaya</td>
+                                        <td class="col-spesialis">Umum</td>
+                                        <td class="col-str">STR-10293847</td>
+                                        <td class="col-wallet"><span class="hash-code">0x71C7656EC7ab88b0...8976F</span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-warning btn-icon text-white" title="Edit"
+                                                onclick="bukaModalDokter('edit', 'DOC001')"><i
+                                                    class="bi bi-pencil-square"></i></button>
+                                            <button class="btn btn-danger btn-icon" title="Hapus"
+                                                onclick="hapusBaris('row-DOC001', 'Dr. Andi Wijaya')"><i
+                                                    class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                    <tr id="row-DOC002">
+                                        <td>2.</td>
+                                        <td>DOC002</td>
+                                        <td class="col-nama">Dr. Rina Kusuma</td>
+                                        <td class="col-spesialis">Penyakit Dalam</td>
+                                        <td class="col-str">STR-55667788</td>
+                                        <td class="col-wallet"><span class="hash-code">0x3C44CdDdB6a900fa...293BC</span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-warning btn-icon text-white" title="Edit"
+                                                onclick="bukaModalDokter('edit', 'DOC002')"><i
+                                                    class="bi bi-pencil-square"></i></button>
+                                            <button class="btn btn-danger btn-icon" title="Hapus"
+                                                onclick="hapusBaris('row-DOC002', 'Dr. Rina Kusuma')"><i
+                                                    class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================================
+                     TAB 3: DATA PASIEN (TAMBAH, EDIT, HAPUS)
+                     ==================================================== -->
+                <div id="tab-pasien" class="d-none">
+                    <div class="page-header">
+                        <h1 class="page-title"><i class="bi bi-people"></i> Data Pasien</h1>
+                        <button class="btn btn-success btn-sm fw-semibold" onclick="bukaModalPasien('tambah')">
+                            <i class="bi bi-plus-lg"></i> Tambah Data Pasien
+                        </button>
+                    </div>
+
+                    <div class="panel-card">
+                        <div class="table-responsive">
+                            <table class="table table-custom mb-2" id="tabelPasien">
+                                <thead>
+                                    <tr>
+                                        <th>No</th>
+                                        <th>ID Pasien</th>
+                                        <th>Nama Pasien</th>
+                                        <th>Tanggal Lahir</th>
+                                        <th>Jenis Kelamin</th>
+                                        <th>Alamat</th>
+                                        <th>Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr id="row-PAT001">
+                                        <td>1.</td>
+                                        <td>PAT001</td>
+                                        <td class="col-nama">Budi Santoso</td>
+                                        <td class="col-tgl">1998-05-14</td>
+                                        <td class="col-jk">Laki-laki</td>
+                                        <td class="col-alamat">Jl. Merdeka No. 12, Jakarta</td>
+                                        <td>
+                                            <button class="btn btn-warning btn-icon text-white" title="Edit"
+                                                onclick="bukaModalPasien('edit', 'PAT001')"><i
+                                                    class="bi bi-pencil-square"></i></button>
+                                            <button class="btn btn-danger btn-icon" title="Hapus"
+                                                onclick="hapusBaris('row-PAT001', 'Budi Santoso')"><i
+                                                    class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                    <tr id="row-PAT002">
+                                        <td>2.</td>
+                                        <td>PAT002</td>
+                                        <td class="col-nama">Siti Aminah</td>
+                                        <td class="col-tgl">2001-09-22</td>
+                                        <td class="col-jk">Perempuan</td>
+                                        <td class="col-alamat">Jl. Sudirman No. 45, Bandung</td>
+                                        <td>
+                                            <button class="btn btn-warning btn-icon text-white" title="Edit"
+                                                onclick="bukaModalPasien('edit', 'PAT002')"><i
+                                                    class="bi bi-pencil-square"></i></button>
+                                            <button class="btn btn-danger btn-icon" title="Hapus"
+                                                onclick="hapusBaris('row-PAT002', 'Siti Aminah')"><i
+                                                    class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- ====================================================
+         MODAL TAMBAH / EDIT DATA DOKTER
+         ==================================================== -->
+    <div class="modal fade" id="modalDokter" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h6 class="modal-title fw-bold" id="judulModalDokter">Tambah Data Dokter</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="formDokterModal" onsubmit="simpanDataDokter(event)">
+                    <div class="modal-body small">
+                        <input type="hidden" id="modeDokter">
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">ID Dokter</label>
+                            <input type="text" id="inputDocId" class="form-control form-control-sm"
+                                placeholder="Contoh: DOC003" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Nama Lengkap & Gelar</label>
+                            <input type="text" id="inputDocNama" class="form-control form-control-sm"
+                                placeholder="Contoh: Dr. Hendra" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Spesialisasi</label>
+                            <input type="text" id="inputDocSpesialis" class="form-control form-control-sm"
+                                placeholder="Contoh: Anak" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Nomor STR</label>
+                            <input type="text" id="inputDocStr" class="form-control form-control-sm"
+                                placeholder="Contoh: STR-99887766" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Alamat Wallet</label>
+                            <input type="text" id="inputDocWallet" class="form-control form-control-sm"
+                                placeholder="0x..." required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Simpan Data</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================
+         MODAL TAMBAH / EDIT DATA PASIEN
+         ==================================================== -->
+    <div class="modal fade" id="modalPasien" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h6 class="modal-title fw-bold" id="judulModalPasien">Tambah Data Pasien</h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="formPasienModal" onsubmit="simpanDataPasien(event)">
+                    <div class="modal-body small">
+                        <input type="hidden" id="modePasien">
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">ID Pasien</label>
+                            <input type="text" id="inputPatId" class="form-control form-control-sm"
+                                placeholder="Contoh: PAT003" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Nama Lengkap</label>
+                            <input type="text" id="inputPatNama" class="form-control form-control-sm"
+                                placeholder="Contoh: Ahmad Fauzi" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Tanggal Lahir</label>
+                            <input type="date" id="inputPatTgl" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Jenis Kelamin</label>
+                            <select id="inputPatJk" class="form-select form-select-sm" required>
+                                <option value="Laki-laki">Laki-laki</option>
+                                <option value="Perempuan">Perempuan</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-semibold">Alamat</label>
+                            <textarea id="inputPatAlamat" class="form-control form-control-sm" rows="2"
+                                placeholder="Masukkan alamat lengkap" required></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-primary btn-sm">Simpan Data</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="../static/js/main.js"></script>
+    <script>
+        // 1. Navigasi Tab Sidebar Admin
+        function switchAdminTab(tabName, element) {
+            document.getElementById('tab-akun').classList.add('d-none');
+            document.getElementById('tab-dokter').classList.add('d-none');
+            document.getElementById('tab-pasien').classList.add('d-none');
+            document.getElementById('tab-' + tabName).classList.remove('d-none');
+
+            document.querySelectorAll('.sidebar-menu a').forEach(a => a.classList.remove('active'));
+            element.classList.add('active');
+        }
+
+        // 2. Fungsi Tambah & Edit Dokter
+        const modalDokterEl = new bootstrap.Modal(document.getElementById('modalDokter'));
+        function bukaModalDokter(mode, docId = '') {
+            document.getElementById('modeDokter').value = mode;
+            if (mode === 'tambah') {
+                document.getElementById('judulModalDokter').textContent = 'Tambah Data Dokter';
+                document.getElementById('formDokterModal').reset();
+                document.getElementById('inputDocId').readOnly = false;
+            } else {
+                document.getElementById('judulModalDokter').textContent = 'Edit Data Dokter (' + docId + ')';
+                const row = document.getElementById('row-' + docId);
+                document.getElementById('inputDocId').value = docId;
+                document.getElementById('inputDocId').readOnly = true;
+                document.getElementById('inputDocNama').value = row.querySelector('.col-nama').textContent;
+                document.getElementById('inputDocSpesialis').value = row.querySelector('.col-spesialis').textContent;
+                document.getElementById('inputDocStr').value = row.querySelector('.col-str').textContent;
+                document.getElementById('inputDocWallet').value = row.querySelector('.col-wallet').textContent;
+            }
+            modalDokterEl.show();
+        }
+
+        function simpanDataDokter(e) {
+            e.preventDefault();
+            const mode = document.getElementById('modeDokter').value;
+            const id = document.getElementById('inputDocId').value.trim();
+            const nama = document.getElementById('inputDocNama').value.trim();
+            const spesialis = document.getElementById('inputDocSpesialis').value.trim();
+            const str = document.getElementById('inputDocStr').value.trim();
+            const wallet = document.getElementById('inputDocWallet').value.trim();
+
+            if (mode === 'tambah') {
+                const tbody = document.querySelector('#tabelDokter tbody');
+                const no = tbody.rows.length + 1;
+                const tr = document.createElement('tr');
+                tr.id = 'row-' + id;
+                tr.innerHTML = `
+                    <td>${no}.</td>
+                    <td>${id}</td>
+                    <td class="col-nama">${nama}</td>
+                    <td class="col-spesialis">${spesialis}</td>
+                    <td class="col-str">${str}</td>
+                    <td class="col-wallet"><span class="hash-code">${wallet}</span></td>
+                    <td>
+                        <button class="btn btn-warning btn-icon text-white" title="Edit" onclick="bukaModalDokter('edit', '${id}')"><i class="bi bi-pencil-square"></i></button>
+                        <button class="btn btn-danger btn-icon" title="Hapus" onclick="hapusBaris('row-${id}', '${nama}')"><i class="bi bi-trash"></i></button>
+                    </td>`;
+                tbody.appendChild(tr);
+            } else {
+                const row = document.getElementById('row-' + id);
+                row.querySelector('.col-nama').textContent = nama;
+                row.querySelector('.col-spesialis').textContent = spesialis;
+                row.querySelector('.col-str').textContent = str;
+                row.querySelector('.col-wallet').innerHTML = `<span class="hash-code">${wallet}</span>`;
+            }
+            modalDokterEl.hide();
+        }
+
+        // 3. Fungsi Tambah & Edit Pasien
+        const modalPasienEl = new bootstrap.Modal(document.getElementById('modalPasien'));
+        function bukaModalPasien(mode, patId = '') {
+            document.getElementById('modePasien').value = mode;
+            if (mode === 'tambah') {
+                document.getElementById('judulModalPasien').textContent = 'Tambah Data Pasien';
+                document.getElementById('formPasienModal').reset();
+                document.getElementById('inputPatId').readOnly = false;
+            } else {
+                document.getElementById('judulModalPasien').textContent = 'Edit Data Pasien (' + patId + ')';
+                const row = document.getElementById('row-' + patId);
+                document.getElementById('inputPatId').value = patId;
+                document.getElementById('inputPatId').readOnly = true;
+                document.getElementById('inputPatNama').value = row.querySelector('.col-nama').textContent;
+                document.getElementById('inputPatTgl').value = row.querySelector('.col-tgl').textContent;
+                document.getElementById('inputPatJk').value = row.querySelector('.col-jk').textContent;
+                document.getElementById('inputPatAlamat').value = row.querySelector('.col-alamat').textContent;
+            }
+            modalPasienEl.show();
+        }
+
+        function simpanDataPasien(e) {
+            e.preventDefault();
+            const mode = document.getElementById('modePasien').value;
+            const id = document.getElementById('inputPatId').value.trim();
+            const nama = document.getElementById('inputPatNama').value.trim();
+            const tgl = document.getElementById('inputPatTgl').value;
+            const jk = document.getElementById('inputPatJk').value;
+            const alamat = document.getElementById('inputPatAlamat').value.trim();
+
+            if (mode === 'tambah') {
+                const tbody = document.querySelector('#tabelPasien tbody');
+                const no = tbody.rows.length + 1;
+                const tr = document.createElement('tr');
+                tr.id = 'row-' + id;
+                tr.innerHTML = `
+                    <td>${no}.</td>
+                    <td>${id}</td>
+                    <td class="col-nama">${nama}</td>
+                    <td class="col-tgl">${tgl}</td>
+                    <td class="col-jk">${jk}</td>
+                    <td class="col-alamat">${alamat}</td>
+                    <td>
+                        <button class="btn btn-warning btn-icon text-white" title="Edit" onclick="bukaModalPasien('edit', '${id}')"><i class="bi bi-pencil-square"></i></button>
+                        <button class="btn btn-danger btn-icon" title="Hapus" onclick="hapusBaris('row-${id}', '${nama}')"><i class="bi bi-trash"></i></button>
+                    </td>`;
+                tbody.appendChild(tr);
+            } else {
+                const row = document.getElementById('row-' + id);
+                row.querySelector('.col-nama').textContent = nama;
+                row.querySelector('.col-tgl').textContent = tgl;
+                row.querySelector('.col-jk').textContent = jk;
+                row.querySelector('.col-alamat').textContent = alamat;
+            }
+            modalPasienEl.hide();
+        }
+
+        // 4. Fungsi Hapus Baris Data dengan Konfirmasi
+        function hapusBaris(rowId, nama) {
+            if (confirm(`Peringatan: Apakah Anda yakin ingin menghapus data ${nama}?`)) {
+                const row = document.getElementById(rowId);
+                if (row) row.remove();
+            }
+        }
+    </script>
+</body>
+
+</html>
