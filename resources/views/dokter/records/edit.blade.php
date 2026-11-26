@@ -18,6 +18,13 @@
             </div>
         @endif
 
+        @if (! $medicalRecord->patient->is_registered_onchain)
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Pasien Belum Terdaftar On-Chain:</strong> Wallet pasien belum terdaftar/aktif di blockchain Sepolia. Hubungi Admin sebelum memperbarui rekam medis ini.
+            </div>
+        @endif
+
         <div id="dokterRecordAlert" class="alert d-none fs-6" role="alert"></div>
 
         <div class="page-header">
@@ -123,7 +130,7 @@
                     type="submit"
                     id="btnSubmitUpdateRecord"
                     class="btn btn-primary btn-lg w-100 fw-bold py-3"
-                    @disabled(! $doctor->is_registered_onchain)
+                    @disabled(! $doctor->is_registered_onchain || ! $medicalRecord->patient->is_registered_onchain)
                 >
                     <i class="bi bi-check-circle-fill me-2"></i> Perbarui Rekam Medis di Sepolia
                 </button>

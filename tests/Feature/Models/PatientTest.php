@@ -99,3 +99,50 @@ it('casts date of birth to a date instance and resolves authorized doctors and r
         ->and($patient->logBlockchains->first()->is($blockchainLog))->toBeTrue();
     expect(CarbonImmutable::instance($patient->date_of_birth)->year)->toBe(1995);
 });
+
+it('casts on-chain registration flag, normalizes registration tx hash, and scopes registered patients', function () {
+    $registeredUser = User::create([
+        'username' => 'pasien_onchain',
+        'password' => 'secret-password',
+        'role' => User::ROLE_PASIEN,
+        'wallet_address' => '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+    ]);
+    $pendingUser = User::create([
+        'username' => 'pasien_pending',
+        'password' => 'secret-password',
+        'role' => User::ROLE_PASIEN,
+        'wallet_address' => '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890',
+    ]);
+
+    $registeredPatient = Patient::create([
+        'patient_code' => 'PAT001',
+        'user_id' => $registeredUser->id,
+        'full_name' => 'Pasien Terdaftar',
+        'date_of_birth' => '1994-05-10',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Merdeka No. 1',
+        'is_registered_onchain' => 1,
+        'registration_tx_hash' => '  0x'.str_repeat('A', 64).'  ',
+    ]);
+
+    $pendingPatient = Patient::create([
+        'patient_code' => 'PAT002',
+        'user_id' => $pendingUser->id,
+        'full_name' => 'Pasien Pending',
+        'date_of_birth' => '1996-06-12',
+        'gender' => Patient::GENDER_FEMALE,
+        'address' => 'Jl. Merdeka No. 2',
+        'is_registered_onchain' => 0,
+        'registration_tx_hash' => '   ',
+    ]);
+
+    $scopedPatients = Patient::registeredOnchain()->get();
+
+    expect($registeredPatient->is_registered_onchain)->toBeTrue()
+        ->and($registeredPatient->registration_tx_hash)->toBe('0x'.str_repeat('a', 64))
+        ->and($registeredPatient->registration_tx_hash)->toMatch('/^0x[a-f0-9]{64}$/');
+    expect($pendingPatient->is_registered_onchain)->toBeFalse()
+        ->and($pendingPatient->registration_tx_hash)->toBeNull();
+    expect($scopedPatients)->toHaveCount(1)
+        ->and($scopedPatients->first()->is($registeredPatient))->toBeTrue();
+});

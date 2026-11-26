@@ -17,9 +17,6 @@ Route::middleware('guest')->group(function (): void {
     Route::post('/login', [AuthController::class, 'login'])
         ->middleware('throttle:login')
         ->name('login.store');
-
-    Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
-    Route::post('/register', [AuthController::class, 'register'])->name('register.store');
 });
 
 Route::middleware('auth')->group(function (): void {
@@ -47,6 +44,8 @@ Route::middleware(['auth', 'role:admin'])
         Route::post('/patients', [AdminPatientController::class, 'store'])->name('patients.store');
         Route::put('/patients/{patient}', [AdminPatientController::class, 'update'])->name('patients.update');
         Route::delete('/patients/{patient}', [AdminPatientController::class, 'destroy'])->name('patients.destroy');
+        Route::post('/patients/{patient}/onchain-register', [AdminPatientController::class, 'registerOnchain'])->name('patients.onchain-register');
+        Route::post('/patients/{patient}/onchain-deactivate', [AdminPatientController::class, 'deactivateOnchain'])->name('patients.onchain-deactivate');
     });
 
 Route::middleware(['auth', 'role:dokter'])

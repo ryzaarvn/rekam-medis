@@ -3,7 +3,7 @@
 @section('title', 'Dashboard Admin')
 @section('page', 'admin-dashboard')
 @section('topbar_title', 'Panel Administrator')
-@section('user_display', 'Admin ('.auth()->user()->username.')')
+@section('user_display', 'Admin')
 
 @section('sidebar')
     @include('admin.partials.sidebar')
@@ -11,11 +11,11 @@
 
 @section('content')
     <div class="page-header">
-        <h1 class="page-title"><i class="bi bi-speedometer2"></i> Dashboard Analitik &amp; Aktivitas Blockchain</h1>
+        <h1 class="page-title">Dashboard Admin</h1>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-sm-6 col-xl-3">
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-5 g-3 mb-4">
+        <div class="col">
             <div class="stat-card">
                 <div>
                     <div class="stat-card-label">Total Dokter</div>
@@ -27,7 +27,7 @@
             </div>
         </div>
 
-        <div class="col-sm-6 col-xl-3">
+        <div class="col">
             <div class="stat-card">
                 <div>
                     <div class="stat-card-label">Dokter Terdaftar On-Chain</div>
@@ -39,7 +39,7 @@
             </div>
         </div>
 
-        <div class="col-sm-6 col-xl-3">
+        <div class="col">
             <div class="stat-card">
                 <div>
                     <div class="stat-card-label">Total Pasien</div>
@@ -51,7 +51,19 @@
             </div>
         </div>
 
-        <div class="col-sm-6 col-xl-3">
+        <div class="col">
+            <div class="stat-card">
+                <div>
+                    <div class="stat-card-label">Pasien Terdaftar On-Chain</div>
+                    <div class="stat-card-value text-success">{{ $stats['onchain_patients'] }}</div>
+                </div>
+                <div class="stat-card-icon text-success">
+                    <i class="bi bi-person-check"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="col">
             <div class="stat-card">
                 <div>
                     <div class="stat-card-label">Total Rekam Medis</div>
@@ -67,8 +79,7 @@
     <div class="panel-card">
         <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <div>
-                <h2 class="h6 fw-bold mb-0"><i class="bi bi-activity me-2 text-success"></i>Log Aktivitas Blockchain Terbaru</h2>
-                <small class="text-muted">Audit trail pencatatan dan pembaruan rekam medis di jaringan Ethereum Sepolia.</small>
+                <h2 class="h6 fw-bold mb-0">Log Aktivitas Blockchain Terbaru</h2>
             </div>
             <div class="d-flex gap-2">
                 <a href="{{ route('admin.doctors.index') }}" class="btn btn-outline-primary btn-sm">
@@ -82,7 +93,6 @@
 
         @if ($recentLogs->isEmpty())
             <div class="text-center py-4 text-muted small">
-                <i class="bi bi-inbox fs-3 d-block mb-2"></i>
                 Belum ada log transaksi blockchain yang tercatat.
             </div>
         @else
@@ -133,13 +143,9 @@
                                 </td>
                                 <td>{{ $log->block_number ?? '-' }}</td>
                                 <td>
-                                    <a
-                                        href="https://sepolia.etherscan.io/tx/{{ $log->tx_hash }}"
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        class="btn btn-outline-primary btn-sm"
-                                        title="{{ $log->tx_hash }}"
-                                    >
+                                    <a href="https://sepolia.etherscan.io/tx/{{ $log->tx_hash }}" target="_blank"
+                                        rel="noopener noreferrer" class="btn btn-outline-primary btn-sm"
+                                        title="{{ $log->tx_hash }}">
                                         <i class="bi bi-box-arrow-up-right me-1"></i>
                                         {{ substr($log->tx_hash, 0, 8) }}...{{ substr($log->tx_hash, -6) }}
                                     </a>

@@ -39,6 +39,19 @@ it('displays analytics counts and recent blockchain logs on the admin dashboard'
         'date_of_birth' => '1994-03-15',
         'gender' => Patient::GENDER_FEMALE,
         'address' => 'Jl. Anggrek No. 5',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('2', 64),
+    ]);
+
+    $unregisteredPatientUser = User::factory()->pasien()->create();
+    Patient::create([
+        'patient_code' => 'PAT002',
+        'user_id' => $unregisteredPatientUser->id,
+        'full_name' => 'Bambang Wijaya',
+        'date_of_birth' => '1990-01-20',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Kenanga No. 8',
+        'is_registered_onchain' => false,
     ]);
 
     $record = MedicalRecord::create([
@@ -65,8 +78,15 @@ it('displays analytics counts and recent blockchain logs on the admin dashboard'
     $response = $this->actingAs($admin)->get(route('admin.dashboard'));
 
     $response->assertOk()
+        ->assertViewHas('stats', fn (array $stats): bool => $stats['total_doctors'] === 1
+            && $stats['onchain_doctors'] === 1
+            && $stats['total_patients'] === 2
+            && $stats['onchain_patients'] === 1
+            && $stats['total_records'] === 1)
         ->assertSee('Total Dokter')
         ->assertSee('Dokter Terdaftar On-Chain')
+        ->assertSee('Total Pasien')
+        ->assertSee('Pasien Terdaftar On-Chain')
         ->assertSee('MR001')
         ->assertSee('CREATE')
         ->assertSee("https://sepolia.etherscan.io/tx/{$txHash}");
@@ -164,10 +184,10 @@ it('rejects invalid transaction hash when registering a doctor on-chain', functi
         ->assertJsonValidationErrors('registration_tx_hash');
 });
 
-it('creates, updates, and deletes a patient while blocking deletion when records exist', function () {
+it('creates, updates, syncs on-chain status, and deletes a patient while blocking deletion when records exist', function () {
     $admin = makeAdminUser();
 
-    $this->actingAs($admin)->post(route('admin.patients.store'), [
+    $createResponse = $this->actingAs($admin)->post(route('admin.patients.store'), [
         'full_name' => 'Siti Aminah',
         'date_of_birth' => '2001-09-22',
         'gender' => Patient::GENDER_FEMALE,
@@ -176,18 +196,68 @@ it('creates, updates, and deletes a patient while blocking deletion when records
         'email' => '',
         'password' => 'Password123!',
         'wallet_address' => '0xB2C3D4E5F60718293A4B5C6D7E8F901234567890',
-    ])->assertRedirect(route('admin.patients.index'));
+    ]);
+
+    $createResponse->assertRedirect(route('admin.patients.index'))
+        ->assertSessionHas('status', fn (string $status): bool => str_contains($status, 'blockchain Sepolia'));
 
     $patient = Patient::query()->with('user')->where('full_name', 'Siti Aminah')->firstOrFail();
 
     expect($patient->patient_code)->toBe('PAT001')
+        ->and($patient->is_registered_onchain)->toBeFalse()
+        ->and($patient->registration_tx_hash)->toBeNull()
         ->and($patient->user->wallet_address)->toBe('0xb2c3d4e5f60718293a4b5c6d7e8f901234567890');
 
     $this->actingAs($admin)
         ->get(route('admin.patients.index'))
         ->assertOk()
         ->assertSee('siti_aminah')
-        ->assertSee('0xb2c3d4e5f60718293a4b5c6d7e8f901234567890');
+        ->assertSee('0xb2c3d4e5f60718293a4b5c6d7e8f901234567890')
+        ->assertSee('Belum Terdaftar')
+        ->assertSee('Daftarkan On-Chain');
+
+    $registerTx = '0x'.str_repeat('D', 64);
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-register', $patient), [
+            'registration_tx_hash' => $registerTx,
+        ])
+        ->assertOk()
+        ->assertJsonPath('patient.is_registered_onchain', true);
+
+    $patient->refresh();
+    expect($patient->is_registered_onchain)->toBeTrue()
+        ->and($patient->registration_tx_hash)->toBe(strtolower($registerTx));
+
+    $this->actingAs($admin)
+        ->get(route('admin.patients.index'))
+        ->assertOk()
+        ->assertSee('Terdaftar')
+        ->assertSee('Nonaktifkan On-Chain')
+        ->assertSee("https://sepolia.etherscan.io/tx/{$patient->registration_tx_hash}");
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-deactivate', $patient))
+        ->assertOk()
+        ->assertJsonPath('patient.is_registered_onchain', false);
+
+    $patient->refresh();
+    expect($patient->is_registered_onchain)->toBeFalse()
+        ->and($patient->registration_tx_hash)->toBe(strtolower($registerTx));
+
+    $this->actingAs($admin)
+        ->get(route('admin.patients.index'))
+        ->assertOk()
+        ->assertSee('Dinonaktifkan')
+        ->assertSee('Daftarkan On-Chain');
+
+    // Re-register before testing wallet change reset.
+    $reRegisterTx = '0x'.str_repeat('E', 64);
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-register', $patient), [
+            'tx_hash' => $reRegisterTx,
+        ])
+        ->assertOk()
+        ->assertJsonPath('patient.is_registered_onchain', true);
 
     $this->actingAs($admin)->put(route('admin.patients.update', $patient), [
         'patient_code' => 'PAT001',
@@ -196,10 +266,14 @@ it('creates, updates, and deletes a patient while blocking deletion when records
         'gender' => Patient::GENDER_FEMALE,
         'address' => 'Jl. Asia Afrika No. 1',
         'username' => 'siti_aminah',
-        'wallet_address' => '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890',
+        'wallet_address' => '0x99C3D4E5F60718293A4B5C6D7E8F901234567890',
     ])->assertRedirect(route('admin.patients.index'));
 
-    expect($patient->fresh()->full_name)->toBe('Siti Aminah Updated');
+    $patient->refresh();
+    expect($patient->full_name)->toBe('Siti Aminah Updated')
+        ->and($patient->user->wallet_address)->toBe('0x99c3d4e5f60718293a4b5c6d7e8f901234567890')
+        ->and($patient->is_registered_onchain)->toBeFalse()
+        ->and($patient->registration_tx_hash)->toBeNull();
 
     $doctorUser = User::factory()->dokter()->create();
     $doctor = Doctor::create([
@@ -226,4 +300,24 @@ it('creates, updates, and deletes a patient while blocking deletion when records
         ->assertSessionHas('error');
 
     $this->assertDatabaseHas('patients', ['id' => $patient->id]);
+});
+
+it('rejects invalid transaction hash when registering a patient on-chain', function () {
+    $admin = makeAdminUser();
+    $patientUser = User::factory()->pasien()->create();
+    $patient = Patient::create([
+        'patient_code' => 'PAT001',
+        'user_id' => $patientUser->id,
+        'full_name' => 'Pasien Uji',
+        'date_of_birth' => '1990-02-10',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Mawar No. 1',
+    ]);
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-register', $patient), [
+            'registration_tx_hash' => '0xinvalid',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('registration_tx_hash');
 });

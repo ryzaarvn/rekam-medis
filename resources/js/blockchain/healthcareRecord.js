@@ -196,6 +196,14 @@ export async function getReadOnlyContract({
 
 // ===== Contract Execution Helper =====
 
+function normalizeWriteOptions(optionsOrExpectedWallet = {}) {
+    if (typeof optionsOrExpectedWallet === 'string') {
+        return { expectedWalletAddress: optionsOrExpectedWallet };
+    }
+
+    return optionsOrExpectedWallet ?? {};
+}
+
 async function executeContractWrite(invoker, options = {}) {
     options.onStage?.('metamask');
     const { contract } = await getWritableContract(options);
@@ -212,7 +220,7 @@ export async function addDoctor(doctorAddress, options = {}) {
     const normalizedDoctor = normalizeAddress(doctorAddress);
     const receipt = await executeContractWrite(
         (contract) => contract.addDoctor(normalizedDoctor),
-        options,
+        normalizeWriteOptions(options),
     );
 
     return {
@@ -225,12 +233,38 @@ export async function removeDoctor(doctorAddress, options = {}) {
     const normalizedDoctor = normalizeAddress(doctorAddress);
     const receipt = await executeContractWrite(
         (contract) => contract.removeDoctor(normalizedDoctor),
-        options,
+        normalizeWriteOptions(options),
     );
 
     return {
         ...receipt,
         doctorAddress: normalizedDoctor,
+    };
+}
+
+export async function addPatient(patientAddress, optionsOrExpectedAdminWallet = {}) {
+    const normalizedPatient = normalizeAddress(patientAddress);
+    const receipt = await executeContractWrite(
+        (contract) => contract.addPatient(normalizedPatient),
+        normalizeWriteOptions(optionsOrExpectedAdminWallet),
+    );
+
+    return {
+        ...receipt,
+        patientAddress: normalizedPatient,
+    };
+}
+
+export async function removePatient(patientAddress, optionsOrExpectedAdminWallet = {}) {
+    const normalizedPatient = normalizeAddress(patientAddress);
+    const receipt = await executeContractWrite(
+        (contract) => contract.removePatient(normalizedPatient),
+        normalizeWriteOptions(optionsOrExpectedAdminWallet),
+    );
+
+    return {
+        ...receipt,
+        patientAddress: normalizedPatient,
     };
 }
 
@@ -342,6 +376,13 @@ export async function hasAccess(patientAddress, doctorAddress, options = {}) {
 export async function isDoctorRegistered(doctorAddress, options = {}) {
     const contract = await getReadOnlyContract(options);
     const registered = await contract.isDoctorRegistered(normalizeAddress(doctorAddress));
+
+    return Boolean(registered);
+}
+
+export async function isPatientRegistered(patientAddress, options = {}) {
+    const contract = await getReadOnlyContract(options);
+    const registered = await contract.isPatientRegistered(normalizeAddress(patientAddress));
 
     return Boolean(registered);
 }

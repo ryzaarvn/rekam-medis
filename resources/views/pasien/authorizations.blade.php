@@ -15,6 +15,13 @@
     </div>
 
     <div class="panel-card">
+        @if (! $patient->is_registered_onchain)
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Akun Belum Terdaftar On-Chain:</strong> Wallet Anda belum terdaftar/aktif di blockchain Sepolia. Hubungi Admin untuk registrasi on-chain sebelum mengatur izin dokter.
+            </div>
+        @endif
+
         <p class="text-muted small mb-3">
             Berikan atau cabut izin dokter untuk mencatat dan memperbarui rekam medis Anda. Hanya dokter yang sudah terdaftar aktif
             on-chain di Sepolia yang ditampilkan. Setiap perubahan mengeksekusi transaksi <code>grantAccess</code> atau
@@ -90,6 +97,7 @@
                                             data-url="{{ route('pasien.authorizations.revoke', $doctor) }}"
                                             data-doctor-wallet="{{ $doctor->user->wallet_address }}"
                                             data-doctor-name="{{ $doctor->full_name }}"
+                                            @disabled(! $patient->is_registered_onchain)
                                         >
                                             <i class="bi bi-shield-x me-1"></i> Cabut Izin
                                         </button>
@@ -101,6 +109,7 @@
                                             data-url="{{ route('pasien.authorizations.grant', $doctor) }}"
                                             data-doctor-wallet="{{ $doctor->user->wallet_address }}"
                                             data-doctor-name="{{ $doctor->full_name }}"
+                                            @disabled(! $patient->is_registered_onchain)
                                         >
                                             <i class="bi bi-shield-check me-1"></i> Berikan Izin
                                         </button>

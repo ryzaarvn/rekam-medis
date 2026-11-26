@@ -45,6 +45,12 @@ class AuthorizationController extends Controller
      */
     public function grant(UpdateAuthorizationRequest $request, Doctor $doctor): JsonResponse|RedirectResponse
     {
+        $patient = $this->resolvePatient($request);
+
+        if ($rejection = $this->rejectIfPatientNotOnchain($request, $patient)) {
+            return $rejection;
+        }
+
         if (! $doctor->is_registered_onchain || $doctor->registration_tx_hash === null) {
             $errorMessage = 'Izin tidak dapat diberikan karena dokter belum terdaftar aktif di blockchain Sepolia.';
 
@@ -55,7 +61,6 @@ class AuthorizationController extends Controller
             return redirect()->route('pasien.authorizations.index')->with('error', $errorMessage);
         }
 
-        $patient = $this->resolvePatient($request);
         $validated = $request->validated();
 
         $authorization = Authorization::updateOrCreate(
@@ -88,6 +93,11 @@ class AuthorizationController extends Controller
     public function revoke(UpdateAuthorizationRequest $request, Doctor $doctor): JsonResponse|RedirectResponse
     {
         $patient = $this->resolvePatient($request);
+
+        if ($rejection = $this->rejectIfPatientNotOnchain($request, $patient)) {
+            return $rejection;
+        }
+
         $validated = $request->validated();
 
         $authorization = Authorization::updateOrCreate(
@@ -112,6 +122,24 @@ class AuthorizationController extends Controller
         }
 
         return redirect()->route('pasien.authorizations.index')->with('status', $message);
+    }
+
+    /**
+     * Reject grant or revoke attempts when the patient wallet is not registered on-chain.
+     */
+    private function rejectIfPatientNotOnchain(Request $request, Patient $patient): ?JsonResponse
+    {
+        if ($patient->is_registered_onchain) {
+            return null;
+        }
+
+        $errorMessage = 'Wallet Anda belum terdaftar/aktif di blockchain Sepolia. Hubungi Admin untuk registrasi on-chain sebelum mengatur izin dokter.';
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => $errorMessage], 403);
+        }
+
+        abort(403, $errorMessage);
     }
 
     /**

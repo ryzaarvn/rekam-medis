@@ -217,6 +217,43 @@ it('calls hasAccess and isDoctorRegistered via eth_call with padded lowercase ad
     Http::assertSent(fn (Request $request): bool => $request['params'][0]['data'] === $expectedDoctorRegisteredData);
 });
 
+it('calls isPatientRegistered via eth_call with padded lowercase address and handles errors', function () {
+    Http::preventStrayRequests();
+
+    $patientAddress = '0xB2C3D4E5F60718293A4B5C6D7E8F901234567890';
+    $expectedPatientRegisteredData = '0x80b6b1b8'
+        .'000000000000000000000000b2c3d4e5f60718293a4b5c6d7e8f901234567890';
+
+    $revertData = '0x08c379a0'
+        .'0000000000000000000000000000000000000000000000000000000000000020'
+        .'0000000000000000000000000000000000000000000000000000000000000016'
+        .'50617369656e2062656c756d2074657264616674617200000000000000000000';
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 63).'1'])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 64)])
+            ->push([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'error' => [
+                    'code' => 3,
+                    'message' => 'execution reverted',
+                    'data' => $revertData,
+                ],
+            ]),
+    ]);
+
+    $service = app(BlockchainService::class);
+
+    expect($service->isPatientRegistered($patientAddress))->toBeTrue();
+    expect($service->isPatientRegistered($patientAddress))->toBeFalse();
+    expect(fn () => $service->isPatientRegistered($patientAddress))
+        ->toThrow(BlockchainException::class, 'Pasien belum terdaftar');
+
+    Http::assertSent(fn (Request $request): bool => $request['params'][0]['data'] === $expectedPatientRegisteredData);
+});
+
 it('decodes solidity revert reason when rpc returns an execution reverted error', function () {
     Http::preventStrayRequests();
 

@@ -21,7 +21,7 @@
         @if ($authorizedPatients->isEmpty())
             <div class="alert alert-info" role="alert">
                 <i class="bi bi-info-circle-fill me-2"></i>
-                Belum ada pasien yang memberikan izin akses (<code>grantAccess</code>) kepada Anda saat ini.
+                Belum ada pasien terdaftar on-chain yang memberikan izin akses (<code>grantAccess</code>) kepada Anda saat ini.
             </div>
         @endif
 

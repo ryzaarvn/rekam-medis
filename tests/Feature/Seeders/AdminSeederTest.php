@@ -24,7 +24,7 @@ it('seeds a single idempotent admin user from blockchain config without fake tra
         ->and($admin)->not->toBeNull()
         ->and($admin->role)->toBe(User::ROLE_ADMIN)
         ->and($admin->wallet_address)->toBe('0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3')
-        ->and(Hash::check('Admin12345!', $admin->password))->toBeTrue();
+        ->and(Hash::check('password', $admin->password))->toBeTrue();
 
     expect(Authorization::query()->count())->toBe(0);
     expect(MedicalRecord::query()->count())->toBe(0);

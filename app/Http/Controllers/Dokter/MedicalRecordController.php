@@ -29,6 +29,7 @@ class MedicalRecordController extends Controller
         $doctor = $this->resolveDoctor($request);
 
         $authorizedPatients = $doctor->authorizedPatients()
+            ->registeredOnchain()
             ->with('user')
             ->orderBy('full_name')
             ->get();
@@ -47,6 +48,7 @@ class MedicalRecordController extends Controller
         $doctor = $this->resolveDoctor($request);
 
         $authorizedPatientIds = $doctor->authorizedPatients()
+            ->registeredOnchain()
             ->pluck('patients.id')
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
@@ -82,9 +84,7 @@ class MedicalRecordController extends Controller
         $validated = $request->validated();
         $patientId = (int) $validated['patient_id'];
 
-        $this->ensureDoctorAuthorizedForPatient($doctor, $patientId);
-
-        $patient = Patient::query()->with('user')->findOrFail($patientId);
+        $patient = $this->ensureDoctorAuthorizedForPatient($doctor, $patientId);
 
         $recordCode = CodeGenerator::nextCode(
             'MR',
@@ -289,15 +289,21 @@ class MedicalRecordController extends Controller
     }
 
     /**
-     * Verify active patient authorization and optional on-chain doctor registration.
+     * Verify active patient authorization and on-chain registration for both doctor and patient.
      */
     private function ensureDoctorAuthorizedForPatient(
         Doctor $doctor,
         int $patientId,
         bool $requireOnchainRegistration = true,
-    ): void {
+    ): Patient {
         if ($requireOnchainRegistration && ! $doctor->is_registered_onchain) {
             abort(403, 'Akun dokter Anda belum terdaftar aktif on-chain oleh Admin.');
+        }
+
+        $patient = Patient::query()->with('user')->findOrFail($patientId);
+
+        if ($requireOnchainRegistration && ! $patient->is_registered_onchain) {
+            abort(403, 'Pasien ini belum terdaftar aktif on-chain oleh Admin.');
         }
 
         $hasActiveAuthorization = Authorization::query()
@@ -309,6 +315,8 @@ class MedicalRecordController extends Controller
         if (! $hasActiveAuthorization) {
             abort(403, 'Anda belum memiliki otorisasi aktif dari pasien ini.');
         }
+
+        return $patient;
     }
 
     /**

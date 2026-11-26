@@ -4,14 +4,10 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
-use App\Http\Requests\Auth\RegisterPatientRequest;
-use App\Models\Patient;
 use App\Models\User;
-use App\Support\CodeGenerator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
 class AuthController extends Controller
@@ -50,54 +46,6 @@ class AuthController extends Controller
         $user = Auth::user();
 
         return redirect()->route($user->dashboardRoute());
-    }
-
-    /**
-     * Show the public patient registration form.
-     */
-    public function showRegister(): View
-    {
-        return view('auth.register');
-    }
-
-    /**
-     * Register a new patient account and profile atomically, forcing the patient role.
-     */
-    public function register(RegisterPatientRequest $request): RedirectResponse
-    {
-        $validated = $request->validated();
-
-        $user = DB::transaction(function () use ($validated): User {
-            $user = User::create([
-                'username' => $validated['username'],
-                'email' => $validated['email'] ?? null,
-                'password' => $validated['password'],
-                'role' => User::ROLE_PASIEN,
-                'wallet_address' => $validated['wallet_address'],
-            ]);
-
-            $patientCode = CodeGenerator::nextCode(
-                'PAT',
-                Patient::query()->lockForUpdate()->pluck('patient_code'),
-            );
-
-            Patient::create([
-                'patient_code' => $patientCode,
-                'user_id' => $user->id,
-                'full_name' => $validated['full_name'],
-                'date_of_birth' => $validated['date_of_birth'],
-                'gender' => $validated['gender'],
-                'address' => $validated['address'],
-            ]);
-
-            return $user;
-        });
-
-        Auth::login($user);
-        $request->session()->regenerate();
-
-        return redirect()->route('pasien.dashboard')
-            ->with('status', 'Pendaftaran akun pasien berhasil. Selamat datang di Sistem Rekam Medis.');
     }
 
     /**

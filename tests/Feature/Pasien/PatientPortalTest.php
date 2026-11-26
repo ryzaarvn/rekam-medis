@@ -25,6 +25,8 @@ function setupPatientPortalScenario(): array
         'date_of_birth' => '1992-05-14',
         'gender' => Patient::GENDER_MALE,
         'address' => 'Jl. Merdeka No. 10',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('9', 64),
     ]);
 
     $otherPatientUser = User::factory()->pasien()->create([
@@ -38,6 +40,23 @@ function setupPatientPortalScenario(): array
         'date_of_birth' => '1997-02-12',
         'gender' => Patient::GENDER_FEMALE,
         'address' => 'Jl. Sudirman No. 45',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('8', 64),
+    ]);
+
+    $unregisteredPatientUser = User::factory()->pasien()->create([
+        'username' => 'pasien_belum_onchain',
+        'wallet_address' => '0xe5f60718293a4b5c6d7e8f901234567890123456',
+    ]);
+    $unregisteredPatient = Patient::create([
+        'patient_code' => 'PAT003',
+        'user_id' => $unregisteredPatientUser->id,
+        'full_name' => 'Joko Pending',
+        'date_of_birth' => '1988-09-01',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Diponegoro No. 2',
+        'is_registered_onchain' => false,
+        'registration_tx_hash' => null,
     ]);
 
     $doctorUser = User::factory()->dokter()->create([
@@ -68,7 +87,16 @@ function setupPatientPortalScenario(): array
         'registration_tx_hash' => null,
     ]);
 
-    return compact('patientUser', 'patient', 'otherPatientUser', 'otherPatient', 'activeDoctor', 'pendingDoctor');
+    return compact(
+        'patientUser',
+        'patient',
+        'otherPatientUser',
+        'otherPatient',
+        'unregisteredPatientUser',
+        'unregisteredPatient',
+        'activeDoctor',
+        'pendingDoctor',
+    );
 }
 
 it('lists only active on-chain doctors and grants or revokes authorization with lowercase tx_hash', function () {
@@ -112,6 +140,47 @@ it('lists only active on-chain doctors and grants or revokes authorization with 
             'tx_hash' => '0x'.str_repeat('c', 64),
         ])
         ->assertUnprocessable();
+});
+
+it('warns and forbids granting or revoking access when the patient is not registered on-chain', function () {
+    $ctx = setupPatientPortalScenario();
+
+    Authorization::create([
+        'patient_id' => $ctx['unregisteredPatient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'is_authorized' => true,
+        'tx_hash' => '0x'.str_repeat('d', 64),
+    ]);
+
+    $this->actingAs($ctx['unregisteredPatientUser'])
+        ->get(route('pasien.authorizations.index'))
+        ->assertOk()
+        ->assertSee('Wallet Anda belum terdaftar/aktif di blockchain Sepolia. Hubungi Admin untuk registrasi on-chain sebelum mengatur izin dokter.')
+        ->assertSee('disabled', false);
+
+    $this->actingAs($ctx['unregisteredPatientUser'])
+        ->postJson(route('pasien.authorizations.grant', $ctx['activeDoctor']), [
+            'tx_hash' => '0x'.str_repeat('e', 64),
+        ])
+        ->assertForbidden()
+        ->assertJsonPath(
+            'message',
+            'Wallet Anda belum terdaftar/aktif di blockchain Sepolia. Hubungi Admin untuk registrasi on-chain sebelum mengatur izin dokter.',
+        );
+
+    $this->actingAs($ctx['unregisteredPatientUser'])
+        ->postJson(route('pasien.authorizations.revoke', $ctx['activeDoctor']), [
+            'tx_hash' => '0x'.str_repeat('f', 64),
+        ])
+        ->assertForbidden();
+
+    expect(
+        Authorization::query()
+            ->where('patient_id', $ctx['unregisteredPatient']->id)
+            ->where('doctor_id', $ctx['activeDoctor']->id)
+            ->firstOrFail()
+            ->is_authorized,
+    )->toBeTrue();
 });
 
 it('restricts patient dashboard medical records to the logged-in patient and hides other patients records', function () {

@@ -20,6 +20,7 @@ class DashboardController extends Controller
             'total_doctors' => Doctor::query()->count(),
             'onchain_doctors' => Doctor::query()->registeredOnchain()->count(),
             'total_patients' => Patient::query()->count(),
+            'onchain_patients' => Patient::query()->registeredOnchain()->count(),
             'total_records' => MedicalRecord::query()->count(),
         ];
 

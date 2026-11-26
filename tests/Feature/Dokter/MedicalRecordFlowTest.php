@@ -38,6 +38,8 @@ function setupDoctorAndPatients(bool $doctorOnchain = true): array
         'date_of_birth' => '1992-05-14',
         'gender' => Patient::GENDER_MALE,
         'address' => 'Jl. Merdeka No. 10',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('9', 64),
     ]);
 
     $revokedPatientUser = User::factory()->pasien()->create([
@@ -51,6 +53,8 @@ function setupDoctorAndPatients(bool $doctorOnchain = true): array
         'date_of_birth' => '1995-07-20',
         'gender' => Patient::GENDER_FEMALE,
         'address' => 'Jl. Melati No. 3',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('8', 64),
     ]);
 
     $unauthPatientUser = User::factory()->pasien()->create([
@@ -64,6 +68,23 @@ function setupDoctorAndPatients(bool $doctorOnchain = true): array
         'date_of_birth' => '1990-01-11',
         'gender' => Patient::GENDER_MALE,
         'address' => 'Jl. Kenanga No. 8',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('7', 64),
+    ]);
+
+    $unregisteredAuthPatientUser = User::factory()->pasien()->create([
+        'username' => 'pasien_belum_onchain',
+        'wallet_address' => '0xe5f60718293a4b5c6d7e8f901234567890123456',
+    ]);
+    $unregisteredAuthorizedPatient = Patient::create([
+        'patient_code' => 'PAT004',
+        'user_id' => $unregisteredAuthPatientUser->id,
+        'full_name' => 'Dewi Pending',
+        'date_of_birth' => '1993-11-11',
+        'gender' => Patient::GENDER_FEMALE,
+        'address' => 'Jl. Teratai No. 4',
+        'is_registered_onchain' => false,
+        'registration_tx_hash' => null,
     ]);
 
     Authorization::create([
@@ -80,10 +101,24 @@ function setupDoctorAndPatients(bool $doctorOnchain = true): array
         'tx_hash' => '0x'.str_repeat('3', 64),
     ]);
 
-    return compact('doctorUser', 'doctor', 'authorizedPatient', 'revokedPatient', 'unauthorizedPatient');
+    Authorization::create([
+        'patient_id' => $unregisteredAuthorizedPatient->id,
+        'doctor_id' => $doctor->id,
+        'is_authorized' => true,
+        'tx_hash' => '0x'.str_repeat('6', 64),
+    ]);
+
+    return compact(
+        'doctorUser',
+        'doctor',
+        'authorizedPatient',
+        'revokedPatient',
+        'unauthorizedPatient',
+        'unregisteredAuthorizedPatient',
+    );
 }
 
-it('shows only actively authorized patients in the doctor examination form', function () {
+it('shows only actively authorized on-chain patients in the doctor examination form', function () {
     $ctx = setupDoctorAndPatients();
 
     $response = $this->actingAs($ctx['doctorUser'])->get(route('dokter.dashboard'));
@@ -92,7 +127,8 @@ it('shows only actively authorized patients in the doctor examination form', fun
         ->assertSee('Budi Santoso (PAT001)')
         ->assertSee('data-wallet="0xb2c3d4e5f60718293a4b5c6d7e8f901234567890"', false)
         ->assertDontSee('Rina Permata (PAT002)')
-        ->assertDontSee('Dodi Pratama (PAT003)');
+        ->assertDontSee('Dodi Pratama (PAT003)')
+        ->assertDontSee('Dewi Pending (PAT004)');
 });
 
 it('executes the 2-step prepare and store CREATE flow with blockchain log persistence', function () {
@@ -296,5 +332,67 @@ it('executes the 2-step prepare-update and update flow and appends an UPDATE log
 
     $this->actingAs($ctx['doctorUser'])
         ->get(route('dokter.records.edit', $record))
+        ->assertForbidden();
+});
+
+it('forbids prepareStore, store, prepareUpdate, and update when patient is not registered on-chain', function () {
+    $ctx = setupDoctorAndPatients();
+
+    $basePayload = [
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam ringan',
+        'diagnosis' => 'Observasi',
+        'treatment' => 'Istirahat',
+        'notes' => null,
+    ];
+
+    $this->actingAs($ctx['doctorUser'])
+        ->postJson(route('dokter.records.prepare'), [
+            ...$basePayload,
+            'patient_id' => $ctx['unregisteredAuthorizedPatient']->id,
+        ])
+        ->assertForbidden();
+
+    $this->actingAs($ctx['doctorUser'])
+        ->postJson(route('dokter.records.store'), [
+            ...$basePayload,
+            'record_code' => 'MR900',
+            'patient_id' => $ctx['unregisteredAuthorizedPatient']->id,
+            'current_hash' => '0x'.str_repeat('a', 64),
+            'tx_hash' => '0x'.str_repeat('b', 64),
+        ])
+        ->assertForbidden();
+
+    $existingRecord = MedicalRecord::create([
+        'record_code' => 'MR901',
+        'patient_id' => $ctx['unregisteredAuthorizedPatient']->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'record_date' => '2026-11-25',
+        'complaint' => 'Batuk',
+        'diagnosis' => 'ISPA',
+        'treatment' => 'Vitamin',
+        'current_hash' => '0x'.str_repeat('c', 64),
+    ]);
+
+    $this->actingAs($ctx['doctorUser'])
+        ->get(route('dokter.records.index'))
+        ->assertOk()
+        ->assertSee('Pasien Belum On-Chain');
+
+    $this->actingAs($ctx['doctorUser'])
+        ->get(route('dokter.records.edit', $existingRecord))
+        ->assertOk()
+        ->assertSee('Pasien Belum Terdaftar On-Chain');
+
+    $this->actingAs($ctx['doctorUser'])
+        ->postJson(route('dokter.records.prepare-update', $existingRecord), $basePayload)
+        ->assertForbidden();
+
+    $this->actingAs($ctx['doctorUser'])
+        ->putJson(route('dokter.records.update', $existingRecord), [
+            ...$basePayload,
+            'current_hash' => '0x'.str_repeat('d', 64),
+            'tx_hash' => '0x'.str_repeat('e', 64),
+        ])
         ->assertForbidden();
 });

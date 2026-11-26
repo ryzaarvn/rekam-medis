@@ -17,7 +17,6 @@
         <div class="auth-banner">
             <div class="auth-banner-content">
                 <h1>Mengamankan data medis, memberdayakan pasien.</h1>
-                <p>Sistem Rekam Medis Elektronik terverifikasi Blockchain Ethereum Sepolia.</p>
             </div>
         </div>
 
@@ -25,10 +24,6 @@
             <div class="auth-panel-body @yield('panel_body_class')">
                 @yield('content')
             </div>
-
-            <footer class="auth-footer">
-                Tentang &bull; Bantuan &bull; Privasi &bull; Syarat &amp; Ketentuan &bull; 2026 E-Rekam Medis
-            </footer>
         </div>
     </div>
 

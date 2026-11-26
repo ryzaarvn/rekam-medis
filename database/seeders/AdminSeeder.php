@@ -24,8 +24,8 @@ class AdminSeeder extends Seeder
         User::updateOrCreate(
             ['username' => 'admin'],
             [
-                'email' => 'admin@erekammedis.local',
-                'password' => 'Admin12345!',
+                'email' => 'admin@rekammedis.test',
+                'password' => 'password',
                 'role' => User::ROLE_ADMIN,
                 'wallet_address' => $walletAddress,
             ],

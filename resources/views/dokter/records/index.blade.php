@@ -67,7 +67,10 @@
                     <tbody>
                         @foreach ($records as $index => $record)
                             @php
-                                $canEdit = $doctor->is_registered_onchain && in_array($record->patient_id, $authorizedPatientIds, true);
+                                $isPatientOnchain = $record->patient->is_registered_onchain;
+                                $canEdit = $doctor->is_registered_onchain
+                                    && $isPatientOnchain
+                                    && in_array($record->patient_id, $authorizedPatientIds, true);
                             @endphp
                             <tr>
                                 <td>{{ $index + 1 }}.</td>
@@ -112,7 +115,13 @@
                                         </a>
                                     @else
                                         <span class="badge bg-secondary" title="Diperlukan izin aktif pasien &amp; registrasi on-chain">
-                                            {{ $doctor->is_registered_onchain ? 'Izin Dicabut' : 'Belum On-Chain' }}
+                                            @if (! $doctor->is_registered_onchain)
+                                                Belum On-Chain
+                                            @elseif (! $isPatientOnchain)
+                                                Pasien Belum On-Chain
+                                            @else
+                                                Izin Dicabut
+                                            @endif
                                         </span>
                                     @endif
                                 </td>

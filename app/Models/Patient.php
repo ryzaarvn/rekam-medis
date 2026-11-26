@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -36,6 +39,8 @@ class Patient extends Model
         'date_of_birth',
         'gender',
         'address',
+        'is_registered_onchain',
+        'registration_tx_hash',
     ];
 
     /**
@@ -47,7 +52,35 @@ class Patient extends Model
     {
         return [
             'date_of_birth' => 'date',
+            'is_registered_onchain' => 'boolean',
         ];
+    }
+
+    /**
+     * Normalize registration transaction hash to lowercase to satisfy the PostgreSQL check constraint.
+     */
+    protected function registrationTxHash(): Attribute
+    {
+        return Attribute::make(
+            set: function (?string $value): ?string {
+                if ($value === null) {
+                    return null;
+                }
+
+                $normalized = strtolower(trim($value));
+
+                return $normalized === '' ? null : $normalized;
+            },
+        );
+    }
+
+    /**
+     * Scope the query to patients registered on-chain.
+     */
+    #[Scope]
+    protected function registeredOnchain(Builder $query): Builder
+    {
+        return $query->where('is_registered_onchain', true);
     }
 
     /**

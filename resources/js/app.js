@@ -32,38 +32,58 @@ function initSidebarToggle() {
     });
 }
 
-function initRegisterWalletButton() {
-    const btnFill = document.getElementById('btnFillWalletFromMetaMask');
-    const inputWallet = document.getElementById('wallet_address');
-    const alertBox = document.getElementById('registerWalletAlert');
-
-    if (!btnFill || !inputWallet) {
-        return;
-    }
-
-    btnFill.addEventListener('click', async () => {
-        if (!window.ethereum) {
-            showAlertBox(alertBox, 'danger', 'MetaMask tidak terdeteksi di browser Anda.');
-            return;
-        }
-
-        try {
-            const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-            if (Array.isArray(accounts) && accounts.length > 0) {
-                inputWallet.value = healthcareBlockchain.normalizeAddress(accounts[0]);
-                alertBox?.classList.add('d-none');
-            }
-        } catch (error) {
-            showAlertBox(alertBox, 'danger', formatBlockchainError(error));
-        }
-    });
-}
-
-function initAdminDoctorsPage() {
+function bindAdminOnchainButtons({ walletDatasetKey, nameDatasetKey, registerFn, deactivateFn }) {
     const alertBox = document.getElementById('globalBlockchainAlert');
     const expectedWalletAddress = getExpectedWalletAddress();
     const expectedChainId = getConfiguredChainId();
 
+    const handleOnchainAction = async (button, isRegister) => {
+        const targetWallet = button.dataset[walletDatasetKey];
+        const targetName = button.dataset[nameDatasetKey];
+        const url = button.dataset.url;
+
+        try {
+            setButtonStage(button, 'metamask');
+            const options = {
+                expectedWalletAddress,
+                expectedChainId,
+                onStage: (stage) => setButtonStage(button, stage),
+            };
+
+            const receipt = isRegister
+                ? await registerFn(targetWallet, options)
+                : await deactivateFn(targetWallet, options);
+
+            setButtonStage(button, 'database');
+            const result = await sendJsonRequest(
+                url,
+                'POST',
+                isRegister ? { registration_tx_hash: receipt.txHash } : { tx_hash: receipt.txHash },
+            );
+
+            showAlertBox(
+                alertBox,
+                'success',
+                result.message ?? `Status on-chain ${targetName} berhasil diperbarui.`,
+                result.etherscan_url ?? null,
+            );
+            window.location.reload();
+        } catch (error) {
+            restoreButton(button);
+            showAlertBox(alertBox, 'danger', formatBlockchainError(error));
+        }
+    };
+
+    document.querySelectorAll('.btn-register-onchain').forEach((btn) => {
+        btn.addEventListener('click', () => handleOnchainAction(btn, true));
+    });
+
+    document.querySelectorAll('.btn-deactivate-onchain').forEach((btn) => {
+        btn.addEventListener('click', () => handleOnchainAction(btn, false));
+    });
+}
+
+function initAdminDoctorsPage() {
     document.querySelectorAll('.btn-edit-doctor').forEach((button) => {
         button.addEventListener('click', () => {
             const form = document.getElementById('formDoctorEdit');
@@ -81,49 +101,11 @@ function initAdminDoctorsPage() {
         });
     });
 
-    const handleDoctorOnchainAction = async (button, isRegister) => {
-        const doctorWallet = button.dataset.doctorWallet;
-        const doctorName = button.dataset.doctorName;
-        const url = button.dataset.url;
-
-        try {
-            setButtonStage(button, 'metamask');
-            const options = {
-                expectedWalletAddress,
-                expectedChainId,
-                onStage: (stage) => setButtonStage(button, stage),
-            };
-
-            const receipt = isRegister
-                ? await healthcareBlockchain.addDoctor(doctorWallet, options)
-                : await healthcareBlockchain.removeDoctor(doctorWallet, options);
-
-            setButtonStage(button, 'database');
-            const result = await sendJsonRequest(
-                url,
-                'POST',
-                isRegister ? { registration_tx_hash: receipt.txHash } : { tx_hash: receipt.txHash },
-            );
-
-            showAlertBox(
-                alertBox,
-                'success',
-                result.message ?? `Status on-chain ${doctorName} berhasil diperbarui.`,
-                result.etherscan_url ?? null,
-            );
-            window.location.reload();
-        } catch (error) {
-            restoreButton(button);
-            showAlertBox(alertBox, 'danger', formatBlockchainError(error));
-        }
-    };
-
-    document.querySelectorAll('.btn-register-onchain').forEach((btn) => {
-        btn.addEventListener('click', () => handleDoctorOnchainAction(btn, true));
-    });
-
-    document.querySelectorAll('.btn-deactivate-onchain').forEach((btn) => {
-        btn.addEventListener('click', () => handleDoctorOnchainAction(btn, false));
+    bindAdminOnchainButtons({
+        walletDatasetKey: 'doctorWallet',
+        nameDatasetKey: 'doctorName',
+        registerFn: healthcareBlockchain.addDoctor,
+        deactivateFn: healthcareBlockchain.removeDoctor,
     });
 }
 
@@ -144,6 +126,13 @@ function initAdminPatientsPage() {
 
             window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPatientEdit')).show();
         });
+    });
+
+    bindAdminOnchainButtons({
+        walletDatasetKey: 'patientWallet',
+        nameDatasetKey: 'patientName',
+        registerFn: healthcareBlockchain.addPatient,
+        deactivateFn: healthcareBlockchain.removePatient,
     });
 }
 
@@ -402,6 +391,10 @@ function initPasienAuthorizations() {
 
     document.querySelectorAll('.btn-auth-action').forEach((button) => {
         button.addEventListener('click', async () => {
+            if (button.disabled) {
+                return;
+            }
+
             const action = button.dataset.action;
             const doctorWallet = button.dataset.doctorWallet;
             const url = button.dataset.url;
@@ -449,9 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initTopbarWallet();
     initConfirmForms();
 
-    if (page === 'register') {
-        initRegisterWalletButton();
-    } else if (page === 'admin-doctors') {
+    if (page === 'admin-doctors') {
         initAdminDoctorsPage();
     } else if (page === 'admin-patients') {
         initAdminPatientsPage();

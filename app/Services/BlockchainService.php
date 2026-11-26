@@ -27,6 +27,8 @@ class BlockchainService
 
     private const SELECTOR_IS_DOCTOR_REGISTERED = '0x78550390';
 
+    private const SELECTOR_IS_PATIENT_REGISTERED = '0x80b6b1b8';
+
     private const SELECTOR_ERROR_STRING = '08c379a0';
 
     /**
@@ -278,6 +280,19 @@ class BlockchainService
         $resultHex = $this->ethCall('isDoctorRegistered', $callData);
 
         return $this->decodeBool($resultHex, 'isDoctorRegistered');
+    }
+
+    /**
+     * Call isPatientRegistered(address _patient) via Sepolia JSON-RPC.
+     */
+    public function isPatientRegistered(string $patientAddress): bool
+    {
+        $callData = self::SELECTOR_IS_PATIENT_REGISTERED
+            .$this->encodeAddressWord($patientAddress);
+
+        $resultHex = $this->ethCall('isPatientRegistered', $callData);
+
+        return $this->decodeBool($resultHex, 'isPatientRegistered');
     }
 
     /**
