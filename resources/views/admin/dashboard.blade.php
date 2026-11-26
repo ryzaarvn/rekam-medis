@@ -81,14 +81,6 @@
             <div>
                 <h2 class="h6 fw-bold mb-0">Log Aktivitas Blockchain Terbaru</h2>
             </div>
-            <div class="d-flex gap-2">
-                <a href="{{ route('admin.doctors.index') }}" class="btn btn-outline-primary btn-sm">
-                    <i class="bi bi-person-badge me-1"></i> Kelola Dokter
-                </a>
-                <a href="{{ route('admin.patients.index') }}" class="btn btn-outline-secondary btn-sm">
-                    <i class="bi bi-people me-1"></i> Kelola Pasien
-                </a>
-            </div>
         </div>
 
         @if ($recentLogs->isEmpty())

@@ -2,8 +2,8 @@
 
 @section('title', 'Riwayat & Verifikasi Pasien')
 @section('page', 'pasien-dashboard')
-@section('topbar_title', 'Portal Pasien')
-@section('user_display', $patient->full_name.' ('.$patient->patient_code.')')
+@section('topbar_title', 'Panel Pasien')
+@section('user_display', $patient->full_name)
 
 @section('sidebar')
     @include('pasien.partials.sidebar')
@@ -11,7 +11,7 @@
 
 @section('content')
     <div class="page-header">
-        <h1 class="page-title"><i class="bi bi-file-medical"></i> Riwayat &amp; Verifikasi Integritas Rekam Medis</h1>
+        <h1 class="page-title">Riwayat &amp; Verifikasi Integritas Rekam Medis</h1>
     </div>
 
     <div class="panel-card">
@@ -23,17 +23,23 @@
                 <div class="w-100">
                     <strong>Rekam Medis Terverifikasi (VALID) — <span id="verifValidCode">-</span></strong><br>
                     <span class="small d-block mb-2">
-                        Hash SHA-256 data database saat ini cocok dengan bukti hash yang tercatat di Smart Contract Sepolia. Data asli dan tidak dimanipulasi.
+                        Hash SHA-256 data database saat ini cocok dengan bukti hash yang tercatat di Smart Contract Sepolia.
+                        Data asli dan tidak dimanipulasi.
                     </span>
                     <div class="bg-white text-dark p-2 rounded border small">
-                        <div><strong>Hash Database Saat Ini (Recomputed):</strong> <span id="verifValidRecomputed" class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Hash Tersimpan (current_hash):</strong> <span id="verifValidStored" class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Hash On-Chain (Sepolia):</strong> <span id="verifValidOnchain" class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> <span id="verifValidDoctor">-</span> (<code id="verifValidOnchainDoctor">-</code>)</div>
+                        <div><strong>Hash Database Saat Ini (Recomputed):</strong> <span id="verifValidRecomputed"
+                                class="hash-code">-</span></div>
+                        <div class="mt-1"><strong>Hash Tersimpan (current_hash):</strong> <span id="verifValidStored"
+                                class="hash-code">-</span></div>
+                        <div class="mt-1"><strong>Hash On-Chain (Sepolia):</strong> <span id="verifValidOnchain"
+                                class="hash-code">-</span></div>
+                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> <span id="verifValidDoctor">-</span>
+                            (<code id="verifValidOnchainDoctor">-</code>)</div>
                         <div class="mt-1"><strong>Timestamp On-Chain:</strong> <span id="verifValidTimestamp">-</span></div>
                         <div class="mt-1" id="verifValidTxWrap">
                             <strong>Transaksi Terakhir:</strong>
-                            <a id="verifValidTxLink" href="#" target="_blank" rel="noopener noreferrer" class="ms-1">Lihat di Sepolia Etherscan</a>
+                            <a id="verifValidTxLink" href="#" target="_blank" rel="noopener noreferrer" class="ms-1">Lihat
+                                di Sepolia Etherscan</a>
                         </div>
                     </div>
                 </div>
@@ -44,17 +50,25 @@
             <div class="d-flex align-items-start">
                 <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
                 <div class="w-100">
-                    <strong>PERINGATAN! Integritas Data Tidak Cocok (Dimodifikasi) — <span id="verifInvalidCode">-</span></strong><br>
-                    <span class="small d-block mb-2">Isi rekam medis di database tidak sesuai dengan catatan asli di Blockchain Sepolia!</span>
+                    <strong>PERINGATAN! Integritas Data Tidak Cocok (Dimodifikasi) — <span
+                            id="verifInvalidCode">-</span></strong><br>
+                    <span class="small d-block mb-2">Isi rekam medis di database tidak sesuai dengan catatan asli di
+                        Blockchain Sepolia!</span>
                     <div class="bg-white text-dark p-2 rounded border small">
-                        <div><strong>Hash On-Chain (Sepolia):</strong> <span id="verifInvalidOnchain" class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Hash Database Saat Ini (Recomputed):</strong> <span id="verifInvalidRecomputed" class="hash-code text-danger border-danger">-</span></div>
-                        <div class="mt-1"><strong>Hash Tersimpan (current_hash):</strong> <span id="verifInvalidStored" class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> <span id="verifInvalidDoctor">-</span> (<code id="verifInvalidOnchainDoctor">-</code>)</div>
-                        <div class="mt-1"><strong>Timestamp On-Chain:</strong> <span id="verifInvalidTimestamp">-</span></div>
+                        <div><strong>Hash On-Chain (Sepolia):</strong> <span id="verifInvalidOnchain"
+                                class="hash-code">-</span></div>
+                        <div class="mt-1"><strong>Hash Database Saat Ini (Recomputed):</strong> <span
+                                id="verifInvalidRecomputed" class="hash-code text-danger border-danger">-</span></div>
+                        <div class="mt-1"><strong>Hash Tersimpan (current_hash):</strong> <span id="verifInvalidStored"
+                                class="hash-code">-</span></div>
+                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> <span id="verifInvalidDoctor">-</span>
+                            (<code id="verifInvalidOnchainDoctor">-</code>)</div>
+                        <div class="mt-1"><strong>Timestamp On-Chain:</strong> <span id="verifInvalidTimestamp">-</span>
+                        </div>
                         <div class="mt-1" id="verifInvalidTxWrap">
                             <strong>Transaksi Terakhir:</strong>
-                            <a id="verifInvalidTxLink" href="#" target="_blank" rel="noopener noreferrer" class="ms-1">Lihat di Sepolia Etherscan</a>
+                            <a id="verifInvalidTxLink" href="#" target="_blank" rel="noopener noreferrer" class="ms-1">Lihat
+                                di Sepolia Etherscan</a>
                         </div>
                     </div>
                 </div>
@@ -73,19 +87,19 @@
                         $record->id => [
                             'record_code' => $record->record_code,
                             'record_date' => $record->record_date?->toDateString(),
-                            'doctor_name' => $record->doctor->full_name.' ('.$record->doctor->doctor_code.')',
+                            'doctor_name' => $record->doctor->full_name . ' (' . $record->doctor->doctor_code . ')',
                             'complaint' => $record->complaint,
                             'diagnosis' => $record->diagnosis,
                             'treatment' => $record->treatment,
                             'notes' => $record->notes ?? '-',
                             'current_hash' => $record->current_hash,
-                            'logs' => $record->logBlockchains->sortByDesc('id')->values()->map(fn ($log): array => [
+                            'logs' => $record->logBlockchains->sortByDesc('id')->values()->map(fn($log): array => [
                                 'action_type' => $log->action_type,
-                                'doctor_name' => $log->doctor ? $log->doctor->full_name.' ('.$log->doctor->doctor_code.')' : '-',
+                                'doctor_name' => $log->doctor ? $log->doctor->full_name . ' (' . $log->doctor->doctor_code . ')' : '-',
                                 'onchain_hash' => $log->onchain_hash,
                                 'tx_hash' => $log->tx_hash,
                                 'block_number' => $log->block_number ?? '-',
-                                'created_at' => $log->created_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i:s').' WIB',
+                                'created_at' => $log->created_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i:s') . ' WIB',
                             ])->all(),
                         ],
                     ];
@@ -113,19 +127,13 @@
                                 <td>{{ $record->doctor->full_name }} ({{ $record->doctor->doctor_code }})</td>
                                 <td>{{ $record->diagnosis }}</td>
                                 <td class="text-nowrap">
-                                    <button
-                                        type="button"
-                                        class="btn btn-info btn-sm text-white me-1 btn-pasien-detail"
-                                        data-record-id="{{ $record->id }}"
-                                    >
+                                    <button type="button" class="btn btn-info btn-sm text-white me-1 btn-pasien-detail"
+                                        data-record-id="{{ $record->id }}">
                                         <i class="bi bi-eye me-1"></i> Detail
                                     </button>
-                                    <button
-                                        type="button"
-                                        class="btn btn-success btn-sm btn-verify-record"
+                                    <button type="button" class="btn btn-success btn-sm btn-verify-record"
                                         data-verify-url="{{ route('pasien.records.verify', $record) }}"
-                                        data-record-code="{{ $record->record_code }}"
-                                    >
+                                        data-record-code="{{ $record->record_code }}">
                                         <i class="bi bi-shield-check me-1"></i> Verifikasi
                                     </button>
                                 </td>
@@ -135,7 +143,8 @@
                 </table>
             </div>
 
-            <script id="pasienRecordsJson" type="application/json">{!! json_encode($recordsPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) !!}</script>
+            <script id="pasienRecordsJson"
+                type="application/json">{!! json_encode($recordsPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) !!}</script>
         @endif
     </div>
 @endsection
@@ -146,7 +155,8 @@
             <div class="modal-content">
                 <div class="modal-header bg-primary text-white">
                     <h6 class="modal-title fw-bold" id="pasienDetailModalTitle">Detail Rekam Medis</h6>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Tutup"></button>
                 </div>
                 <div class="modal-body small">
                     <p class="mb-1"><strong>Tanggal Pemeriksaan:</strong> <span id="pasienDetailDate">-</span></p>

@@ -4,7 +4,8 @@
     </a>
 </li>
 <li>
-    <a href="{{ route('pasien.authorizations.index') }}" class="{{ request()->routeIs('pasien.authorizations.*') ? 'active' : '' }}">
+    <a href="{{ route('pasien.authorizations.index') }}"
+        class="{{ request()->routeIs('pasien.authorizations.*') ? 'active' : '' }}">
         <i class="bi bi-shield-lock"></i> Pengelolaan Izin Dokter
     </a>
 </li>
@@ -12,7 +13,7 @@
     <form method="POST" action="{{ route('logout') }}">
         @csrf
         <button type="submit" class="sidebar-logout-btn">
-            <i class="bi bi-box-arrow-left"></i> Logout
+            <i class="bi bi-box-arrow-left"></i> Keluar
         </button>
     </form>
 </li>

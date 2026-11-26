@@ -2,8 +2,8 @@
 
 @section('title', 'Riwayat Pemeriksaan')
 @section('page', 'dokter-records-index')
-@section('topbar_title', 'Portal Dokter')
-@section('user_display', $doctor->full_name.' ('.$doctor->doctor_code.')')
+@section('topbar_title', 'Panel Dokter')
+@section('user_display', $doctor->full_name)
 
 @section('sidebar')
     @include('dokter.partials.sidebar')
@@ -11,7 +11,7 @@
 
 @section('content')
     <div class="page-header">
-        <h1 class="page-title"><i class="bi bi-journal-medical"></i> Riwayat Pemeriksaan &amp; Daftar Rekam Medis</h1>
+        <h1 class="page-title">Riwayat Pemeriksaan</h1>
         <a href="{{ route('dokter.dashboard') }}" class="btn btn-primary btn-sm fw-semibold">
             <i class="bi bi-plus-lg me-1"></i> Catat Pemeriksaan Baru
         </a>
@@ -21,7 +21,7 @@
         @if ($records->isEmpty())
             <div class="text-center py-4 text-muted">
                 <i class="bi bi-journal-x fs-3 d-block mb-2"></i>
-                Belum ada rekam medis yang Anda catat atau dari pasien yang mengotorisasi Anda.
+                Belum ada pemeriksaan yang Anda lakukan.
             </div>
         @else
             @php
@@ -30,20 +30,20 @@
                         $record->id => [
                             'record_code' => $record->record_code,
                             'record_date' => $record->record_date?->toDateString(),
-                            'patient_name' => $record->patient->full_name.' ('.$record->patient->patient_code.')',
-                            'doctor_name' => $record->doctor->full_name.' ('.$record->doctor->doctor_code.')',
+                            'patient_name' => $record->patient->full_name . ' (' . $record->patient->patient_code . ')',
+                            'doctor_name' => $record->doctor->full_name . ' (' . $record->doctor->doctor_code . ')',
                             'complaint' => $record->complaint,
                             'diagnosis' => $record->diagnosis,
                             'treatment' => $record->treatment,
                             'notes' => $record->notes ?? '-',
                             'current_hash' => $record->current_hash,
-                            'logs' => $record->logBlockchains->sortByDesc('id')->values()->map(fn ($log): array => [
+                            'logs' => $record->logBlockchains->sortByDesc('id')->values()->map(fn($log): array => [
                                 'action_type' => $log->action_type,
-                                'doctor_name' => $log->doctor ? $log->doctor->full_name.' ('.$log->doctor->doctor_code.')' : '-',
+                                'doctor_name' => $log->doctor ? $log->doctor->full_name . ' (' . $log->doctor->doctor_code . ')' : '-',
                                 'onchain_hash' => $log->onchain_hash,
                                 'tx_hash' => $log->tx_hash,
                                 'block_number' => $log->block_number ?? '-',
-                                'created_at' => $log->created_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i:s').' WIB',
+                                'created_at' => $log->created_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i:s') . ' WIB',
                             ])->all(),
                         ],
                     ];
@@ -84,12 +84,8 @@
                                 <td>{{ $record->diagnosis }}</td>
                                 <td>
                                     @if ($record->latestLogBlockchain)
-                                        <a
-                                            href="https://sepolia.etherscan.io/tx/{{ $record->latestLogBlockchain->tx_hash }}"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="btn btn-outline-primary btn-sm"
-                                        >
+                                        <a href="https://sepolia.etherscan.io/tx/{{ $record->latestLogBlockchain->tx_hash }}"
+                                            target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm">
                                             <i class="bi bi-box-arrow-up-right me-1"></i>
                                             {{ substr($record->latestLogBlockchain->tx_hash, 0, 8) }}...{{ substr($record->latestLogBlockchain->tx_hash, -6) }}
                                         </a>
@@ -98,26 +94,20 @@
                                     @endif
                                 </td>
                                 <td class="text-nowrap">
-                                    <button
-                                        type="button"
-                                        class="btn btn-info btn-sm text-white me-1 btn-dokter-detail"
-                                        data-record-id="{{ $record->id }}"
-                                    >
+                                    <button type="button" class="btn btn-info btn-sm text-white me-1 btn-dokter-detail"
+                                        data-record-id="{{ $record->id }}">
                                         <i class="bi bi-eye me-1"></i> Detail
                                     </button>
 
                                     @if ($canEdit)
-                                        <a
-                                            href="{{ route('dokter.records.edit', $record) }}"
-                                            class="btn btn-warning btn-sm text-white"
-                                        >
+                                        <a href="{{ route('dokter.records.edit', $record) }}" class="btn btn-warning btn-sm text-white">
                                             <i class="bi bi-pencil-square me-1"></i> Edit
                                         </a>
                                     @else
                                         <span class="badge bg-secondary" title="Diperlukan izin aktif pasien &amp; registrasi on-chain">
-                                            @if (! $doctor->is_registered_onchain)
+                                            @if (!$doctor->is_registered_onchain)
                                                 Belum On-Chain
-                                            @elseif (! $isPatientOnchain)
+                                            @elseif (!$isPatientOnchain)
                                                 Pasien Belum On-Chain
                                             @else
                                                 Izin Dicabut
@@ -131,7 +121,8 @@
                 </table>
             </div>
 
-            <script id="dokterRecordsJson" type="application/json">{!! json_encode($recordsPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) !!}</script>
+            <script id="dokterRecordsJson"
+                type="application/json">{!! json_encode($recordsPayload, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) !!}</script>
         @endif
     </div>
 @endsection
@@ -142,11 +133,13 @@
             <div class="modal-content">
                 <div class="modal-header bg-primary text-white">
                     <h6 class="modal-title fw-bold" id="dokterDetailModalTitle">Detail Rekam Medis</h6>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Tutup"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                        aria-label="Tutup"></button>
                 </div>
                 <div class="modal-body small">
                     <div class="row g-2 mb-3">
-                        <div class="col-md-6"><strong>Tanggal Pemeriksaan:</strong> <span id="dokterDetailDate">-</span></div>
+                        <div class="col-md-6"><strong>Tanggal Pemeriksaan:</strong> <span id="dokterDetailDate">-</span>
+                        </div>
                         <div class="col-md-6"><strong>Pasien:</strong> <span id="dokterDetailPatient">-</span></div>
                         <div class="col-12"><strong>Dokter Terakhir:</strong> <span id="dokterDetailDoctor">-</span></div>
                     </div>
