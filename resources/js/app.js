@@ -1,11 +1,13 @@
 import * as healthcareBlockchain from './blockchain/healthcareRecord';
 import {
+    consumeFlashAlert,
     formatBlockchainError,
     getConfiguredChainId,
     getExpectedWalletAddress,
     initTopbarWallet,
     renderLogsTableRows,
     restoreButton,
+    saveFlashAlert,
     sendJsonRequest,
     setButtonStage,
     showAlertBox,
@@ -32,10 +34,21 @@ function initSidebarToggle() {
     });
 }
 
+function getTodayWibDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Jakarta',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(new Date());
+}
+
 function bindAdminOnchainButtons({ walletDatasetKey, nameDatasetKey, registerFn, deactivateFn }) {
     const alertBox = document.getElementById('globalBlockchainAlert');
     const expectedWalletAddress = getExpectedWalletAddress();
     const expectedChainId = getConfiguredChainId();
+
+    consumeFlashAlert(alertBox);
 
     const handleOnchainAction = async (button, isRegister) => {
         const targetWallet = button.dataset[walletDatasetKey];
@@ -61,12 +74,11 @@ function bindAdminOnchainButtons({ walletDatasetKey, nameDatasetKey, registerFn,
                 isRegister ? { registration_tx_hash: receipt.txHash } : { tx_hash: receipt.txHash },
             );
 
-            showAlertBox(
-                alertBox,
-                'success',
-                result.message ?? `Status on-chain ${targetName} berhasil diperbarui.`,
-                result.etherscan_url ?? null,
-            );
+            saveFlashAlert({
+                type: 'success',
+                message: result.message ?? `Status on-chain ${targetName} berhasil diperbarui.`,
+                etherscanUrl: result.etherscan_url ?? null,
+            });
             window.location.reload();
         } catch (error) {
             restoreButton(button);
@@ -87,8 +99,11 @@ function initAdminDoctorsPage() {
     document.querySelectorAll('.btn-edit-doctor').forEach((button) => {
         button.addEventListener('click', () => {
             const form = document.getElementById('formDoctorEdit');
+            const isOnchain = button.dataset.isOnchain === '1';
+
             form.action = button.dataset.updateUrl;
             document.getElementById('editDocActionInput').value = button.dataset.updateUrl;
+            document.getElementById('editDocIsOnchain').value = isOnchain ? '1' : '0';
             document.getElementById('editDocCode').value = button.dataset.doctorCode ?? '';
             document.getElementById('editDocFullName').value = button.dataset.fullName ?? '';
             document.getElementById('editDocSpecialization').value = button.dataset.specialization ?? '';
@@ -96,6 +111,7 @@ function initAdminDoctorsPage() {
             document.getElementById('editDocUsername').value = button.dataset.username ?? '';
             document.getElementById('editDocEmail').value = button.dataset.email ?? '';
             document.getElementById('editDocWallet').value = button.dataset.walletAddress ?? '';
+            document.getElementById('editDocWalletOnchainWarning')?.classList.toggle('d-none', !isOnchain);
 
             window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modalDoctorEdit')).show();
         });
@@ -113,8 +129,11 @@ function initAdminPatientsPage() {
     document.querySelectorAll('.btn-edit-patient').forEach((button) => {
         button.addEventListener('click', () => {
             const form = document.getElementById('formPatientEdit');
+            const isOnchain = button.dataset.isOnchain === '1';
+
             form.action = button.dataset.updateUrl;
             document.getElementById('editPatActionInput').value = button.dataset.updateUrl;
+            document.getElementById('editPatIsOnchain').value = isOnchain ? '1' : '0';
             document.getElementById('editPatCode').value = button.dataset.patientCode ?? '';
             document.getElementById('editPatFullName').value = button.dataset.fullName ?? '';
             document.getElementById('editPatDob').value = button.dataset.dateOfBirth ?? '';
@@ -123,6 +142,7 @@ function initAdminPatientsPage() {
             document.getElementById('editPatUsername').value = button.dataset.username ?? '';
             document.getElementById('editPatEmail').value = button.dataset.email ?? '';
             document.getElementById('editPatWallet').value = button.dataset.walletAddress ?? '';
+            document.getElementById('editPatWalletOnchainWarning')?.classList.toggle('d-none', !isOnchain);
 
             window.bootstrap.Modal.getOrCreateInstance(document.getElementById('modalPatientEdit')).show();
         });
@@ -203,7 +223,7 @@ function initDokterCreateForm() {
             form.reset();
             const dateInput = document.getElementById('record_date');
             if (dateInput) {
-                dateInput.value = new Date().toISOString().slice(0, 10);
+                dateInput.value = getTodayWibDate();
             }
         } catch (error) {
             showAlertBox(alertBox, 'danger', formatBlockchainError(error));
@@ -355,23 +375,45 @@ function initPasienDashboard() {
                 const result = await sendJsonRequest(button.dataset.verifyUrl, 'POST', {});
 
                 if (result.is_valid) {
-                    document.getElementById('verifValidCode').textContent = result.record_code;
-                    document.getElementById('verifValidRecomputed').textContent = result.recomputed_hash;
-                    document.getElementById('verifValidStored').textContent = result.stored_current_hash;
-                    document.getElementById('verifValidOnchain').textContent = result.onchain_hash;
-                    document.getElementById('verifValidDoctor').textContent = result.last_doctor_name;
-                    document.getElementById('verifValidOnchainDoctor').textContent = result.onchain_doctor;
-                    document.getElementById('verifValidTimestamp').textContent = result.onchain_timestamp_formatted;
+                    document.getElementById('verifValidCode').textContent = result.record_code ?? '-';
+                    document.getElementById('verifValidRecomputed').textContent = result.recomputed_hash ?? '-';
+                    document.getElementById('verifValidStored').textContent = result.stored_current_hash ?? '-';
+                    document.getElementById('verifValidOnchain').textContent = result.onchain_hash ?? '-';
+                    document.getElementById('verifValidDoctor').textContent = result.last_doctor_name ?? '-';
+                    document.getElementById('verifValidOnchainDoctor').textContent = result.onchain_doctor ?? '-';
+                    document.getElementById('verifValidTimestamp').textContent = result.onchain_timestamp_formatted ?? '-';
                     setVerificationTxLink('verifValidTxWrap', 'verifValidTxLink', result.etherscan_url, result.latest_tx_hash);
                     verifValid?.classList.remove('d-none');
                 } else {
-                    document.getElementById('verifInvalidCode').textContent = result.record_code;
-                    document.getElementById('verifInvalidOnchain').textContent = result.onchain_hash;
-                    document.getElementById('verifInvalidRecomputed').textContent = result.recomputed_hash;
-                    document.getElementById('verifInvalidStored').textContent = result.stored_current_hash;
-                    document.getElementById('verifInvalidDoctor').textContent = result.last_doctor_name;
-                    document.getElementById('verifInvalidOnchainDoctor').textContent = result.onchain_doctor;
-                    document.getElementById('verifInvalidTimestamp').textContent = result.onchain_timestamp_formatted;
+                    const headingEl = document.getElementById('verifInvalidHeading');
+                    const descEl = document.getElementById('verifInvalidDesc');
+
+                    if (verifInvalid) {
+                        verifInvalid.className = result.status === 'not_found_onchain'
+                            ? 'alert alert-warning'
+                            : 'alert alert-danger';
+                    }
+
+                    if (headingEl && descEl) {
+                        if (result.status === 'not_found_onchain') {
+                            headingEl.textContent = 'Belum Tercatat di Blockchain Sepolia';
+                            descEl.textContent = result.message || 'Rekam medis belum tercatat di smart contract Sepolia.';
+                        } else if (result.status === 'patient_mismatch') {
+                            headingEl.textContent = 'PERINGATAN! Wallet Pasien Tidak Cocok';
+                            descEl.textContent = result.message || 'Alamat wallet pasien pada smart contract Sepolia tidak cocok dengan akun Anda!';
+                        } else {
+                            headingEl.textContent = 'PERINGATAN! Integritas Data Tidak Cocok (Dimodifikasi)';
+                            descEl.textContent = result.message || 'Isi rekam medis di database tidak sesuai dengan catatan asli di Blockchain Sepolia!';
+                        }
+                    }
+
+                    document.getElementById('verifInvalidCode').textContent = result.record_code ?? '-';
+                    document.getElementById('verifInvalidOnchain').textContent = result.onchain_hash ?? '-';
+                    document.getElementById('verifInvalidRecomputed').textContent = result.recomputed_hash ?? '-';
+                    document.getElementById('verifInvalidStored').textContent = result.stored_current_hash ?? '-';
+                    document.getElementById('verifInvalidDoctor').textContent = result.last_doctor_name ?? '-';
+                    document.getElementById('verifInvalidOnchainDoctor').textContent = result.onchain_doctor ?? '-';
+                    document.getElementById('verifInvalidTimestamp').textContent = result.onchain_timestamp_formatted ?? '-';
                     setVerificationTxLink('verifInvalidTxWrap', 'verifInvalidTxLink', result.etherscan_url, result.latest_tx_hash);
                     verifInvalid?.classList.remove('d-none');
                 }
@@ -388,6 +430,8 @@ function initPasienAuthorizations() {
     const alertBox = document.getElementById('authActionAlert');
     const expectedWalletAddress = getExpectedWalletAddress();
     const expectedChainId = getConfiguredChainId();
+
+    consumeFlashAlert(alertBox);
 
     document.querySelectorAll('.btn-auth-action').forEach((button) => {
         button.addEventListener('click', async () => {
@@ -414,7 +458,11 @@ function initPasienAuthorizations() {
                 setButtonStage(button, 'database');
                 const result = await sendJsonRequest(url, 'POST', { tx_hash: receipt.txHash });
 
-                showAlertBox(alertBox, 'success', result.message, result.etherscan_url);
+                saveFlashAlert({
+                    type: 'success',
+                    message: result.message,
+                    etherscanUrl: result.etherscan_url ?? null,
+                });
                 window.location.reload();
             } catch (error) {
                 restoreButton(button);

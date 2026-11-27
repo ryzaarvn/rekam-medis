@@ -55,13 +55,13 @@ it('rejects invalid ethereum addresses and bytes32 hashes', function () {
         ->toThrow(InvalidArgumentException::class);
 });
 
-it('produces a deterministic lowercase canonical SHA-256 hash across whitespace and null-note variations', function () {
+it('produces a deterministic lowercase canonical SHA-256 hash using domain codes across whitespace and null-note variations', function () {
     $service = new BlockchainService;
 
     $basePayload = [
         'record_code' => 'MR001',
-        'patient_id' => 1,
-        'doctor_id' => 2,
+        'patient_code' => 'PAT001',
+        'doctor_code' => 'DOC001',
         'record_date' => '2026-11-26',
         'complaint' => 'Demam tinggi',
         'diagnosis' => 'Infeksi virus',
@@ -75,8 +75,8 @@ it('produces a deterministic lowercase canonical SHA-256 hash across whitespace 
         'diagnosis' => 'Infeksi virus',
         'complaint' => "Demam tinggi\r\n",
         'record_date' => '2026-11-26',
-        'doctor_id' => '2',
-        'patient_id' => '1',
+        'doctor_code' => ' DOC001 ',
+        'patient_code' => ' PAT001 ',
         'record_code' => ' MR001 ',
     ];
 
@@ -85,11 +85,25 @@ it('produces a deterministic lowercase canonical SHA-256 hash across whitespace 
     $hashFromEquivalent = $service->hashMedicalRecord($equivalentPayload);
 
     expect($canonicalJson)
-        ->toBe('{"complaint":"Demam tinggi","diagnosis":"Infeksi virus","doctor_id":2,"notes":null,"patient_id":1,"record_code":"MR001","record_date":"2026-11-26","treatment":"Paracetamol"}');
+        ->toBe('{"complaint":"Demam tinggi","diagnosis":"Infeksi virus","doctor_code":"DOC001","notes":null,"patient_code":"PAT001","record_code":"MR001","record_date":"2026-11-26","treatment":"Paracetamol"}');
     expect($hashFromBase)
-        ->toBe('0x68c57e06f394767b08dd73bee57697ea386a849be76a7f40e880b2091a105a4e')
+        ->toBe('0x8c3abcfaf0dfde354421c3695e0dfd83255a18e3c48eea5a8fa5379d053e518e')
         ->toMatch('/^0x[a-f0-9]{64}$/')
         ->toBe($hashFromEquivalent);
+});
+
+it('requires patient_code and doctor_code when building canonical payload', function () {
+    $service = new BlockchainService;
+
+    expect(fn () => $service->buildCanonicalPayload([
+        'record_code' => 'MR001',
+        'patient_code' => '',
+        'doctor_code' => 'DOC001',
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam tinggi',
+        'diagnosis' => 'Infeksi virus',
+        'treatment' => 'Paracetamol',
+    ]))->toThrow(InvalidArgumentException::class, 'patient_code dan doctor_code wajib diisi');
 });
 
 it('changes the canonical SHA-256 hash whenever any medical record field changes', function () {
@@ -97,8 +111,8 @@ it('changes the canonical SHA-256 hash whenever any medical record field changes
 
     $original = [
         'record_code' => 'MR001',
-        'patient_id' => 1,
-        'doctor_id' => 2,
+        'patient_code' => 'PAT001',
+        'doctor_code' => 'DOC001',
         'record_date' => '2026-11-26',
         'complaint' => 'Demam tinggi',
         'diagnosis' => 'Infeksi virus',

@@ -7,9 +7,20 @@ use App\Models\MedicalRecord;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\BlockchainService;
+use App\Support\CodeGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Config::set('blockchain.chain_id', 11155111);
+    Config::set('blockchain.contract_address', '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4');
+    Config::set('blockchain.rpc_url', 'https://eth-sepolia.example.test/v2/test-key');
+    Config::set('blockchain.receipt_max_attempts', 1);
+    Config::set('blockchain.receipt_retry_delay_ms', 0);
+});
 
 function setupDoctorAndPatients(bool $doctorOnchain = true): array
 {
@@ -118,6 +129,46 @@ function setupDoctorAndPatients(bool $doctorOnchain = true): array
     );
 }
 
+function dokterFakeRecordReceipt(
+    string $txHash,
+    string $topic0,
+    string $recordCode,
+    string $patientWallet,
+    string $doctorWallet,
+    string $recordHash,
+    string $blockNumberHex = '0x6ad4aa',
+    string $status = '0x1',
+): array {
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+    $paddedPatient = '0x'.str_pad(substr(strtolower($patientWallet), 2), 64, '0', STR_PAD_LEFT);
+    $paddedDoctor = '0x'.str_pad(substr(strtolower($doctorWallet), 2), 64, '0', STR_PAD_LEFT);
+    $timestampWord = str_pad(dechex(1795680000), 64, '0', STR_PAD_LEFT);
+
+    return [
+        'transactionHash' => strtolower($txHash),
+        'from' => strtolower($doctorWallet),
+        'to' => $contract,
+        'status' => $status,
+        'blockNumber' => $blockNumberHex,
+        'logs' => [[
+            'address' => $contract,
+            'topics' => [
+                $topic0,
+                BlockchainService::encodeRecordId($recordCode),
+                $paddedPatient,
+                $paddedDoctor,
+            ],
+            'data' => strtolower($recordHash).$timestampWord,
+        ]],
+    ];
+}
+
+it('generates sequential medical record codes safely via CodeGenerator::nextMedicalRecordCode', function () {
+    expect(CodeGenerator::nextMedicalRecordCode())->toBe('MR001')
+        ->and(CodeGenerator::nextMedicalRecordCode())->toBe('MR002')
+        ->and(CodeGenerator::nextMedicalRecordCode())->toBe('MR003');
+});
+
 it('shows only actively authorized on-chain patients in the doctor examination form', function () {
     $ctx = setupDoctorAndPatients();
 
@@ -131,7 +182,9 @@ it('shows only actively authorized on-chain patients in the doctor examination f
         ->assertDontSee('Dewi Pending (PAT004)');
 });
 
-it('executes the 2-step prepare and store CREATE flow with blockchain log persistence', function () {
+it('executes the 2-step prepare and store CREATE flow with receipt verification and receipt block_number', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupDoctorAndPatients();
 
     $payload = [
@@ -154,19 +207,37 @@ it('executes the 2-step prepare and store CREATE flow with blockchain log persis
     $expectedHash = app(BlockchainService::class)->hashMedicalRecord([
         ...$payload,
         'record_code' => 'MR001',
-        'doctor_id' => $ctx['doctor']->id,
+        'patient_code' => $ctx['authorizedPatient']->patient_code,
+        'doctor_code' => $ctx['doctor']->doctor_code,
     ]);
 
     expect($preparedHash)->toBe($expectedHash);
 
     $txHash = '0x'.str_repeat('A', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => dokterFakeRecordReceipt(
+                $txHash,
+                '0x30ce74f24973c3793a1a44ecce360de22f3a981e9e7a4b1aed68c6c3611d54a2',
+                'MR001',
+                $ctx['authorizedPatient']->user->wallet_address,
+                $ctx['doctorUser']->wallet_address,
+                $expectedHash,
+                '0x6ad4aa',
+            ),
+        ]),
+    ]);
+
     $storeResponse = $this->actingAs($ctx['doctorUser'])
         ->postJson(route('dokter.records.store'), [
             ...$payload,
             'record_code' => 'MR001',
             'current_hash' => strtoupper($preparedHash),
             'tx_hash' => $txHash,
-            'block_number' => 7001234,
+            'block_number' => 9999999,
         ]);
 
     $storeResponse->assertCreated()
@@ -179,26 +250,66 @@ it('executes the 2-step prepare and store CREATE flow with blockchain log persis
     expect($record->current_hash)->toBe($expectedHash)
         ->and($log->onchain_hash)->toBe($expectedHash)
         ->and($log->tx_hash)->toBe(strtolower($txHash))
-        ->and($log->block_number)->toBe(7001234)
+        ->and($log->block_number)->toBe(7001258)
         ->and($log->action_type)->toBe(LogBlockchain::ACTION_CREATE);
 });
 
-it('rejects store when submitted current_hash does not match recomputed payload hash', function () {
+it('rejects store when submitted current_hash mismatches or on-chain receipt verification fails', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupDoctorAndPatients();
+
+    $payload = [
+        'record_code' => 'MR001',
+        'patient_id' => $ctx['authorizedPatient']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam',
+        'diagnosis' => 'Flu',
+        'treatment' => 'Istirahat',
+        'notes' => null,
+    ];
 
     $this->actingAs($ctx['doctorUser'])
         ->postJson(route('dokter.records.store'), [
-            'record_code' => 'MR001',
-            'patient_id' => $ctx['authorizedPatient']->id,
-            'record_date' => '2026-11-26',
-            'complaint' => 'Demam',
-            'diagnosis' => 'Flu',
-            'treatment' => 'Istirahat',
-            'notes' => null,
+            ...$payload,
             'current_hash' => '0x'.str_repeat('f', 64),
             'tx_hash' => '0x'.str_repeat('e', 64),
         ])
         ->assertUnprocessable();
+
+    $validHash = app(BlockchainService::class)->hashMedicalRecord([
+        ...$payload,
+        'patient_code' => $ctx['authorizedPatient']->patient_code,
+        'doctor_code' => $ctx['doctor']->doctor_code,
+    ]);
+
+    $revertedTx = '0x'.str_repeat('d', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => dokterFakeRecordReceipt(
+                $revertedTx,
+                '0x30ce74f24973c3793a1a44ecce360de22f3a981e9e7a4b1aed68c6c3611d54a2',
+                'MR001',
+                $ctx['authorizedPatient']->user->wallet_address,
+                $ctx['doctorUser']->wallet_address,
+                $validHash,
+                '0x6ad4aa',
+                '0x0',
+            ),
+        ]),
+    ]);
+
+    $this->actingAs($ctx['doctorUser'])
+        ->postJson(route('dokter.records.store'), [
+            ...$payload,
+            'current_hash' => $validHash,
+            'tx_hash' => $revertedTx,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonStructure(['message']);
 
     $this->assertDatabaseCount('medical_records', 0);
     $this->assertDatabaseCount('log_blockchains', 0);
@@ -233,8 +344,25 @@ it('forbids doctor prepare and store when patient has not authorized the doctor'
         ->assertForbidden();
 });
 
-it('forbids doctor prepare when doctor is not registered on-chain', function () {
+it('forbids doctor prepare and hides records index when doctor is not registered on-chain', function () {
     $unregistered = setupDoctorAndPatients(doctorOnchain: false);
+
+    MedicalRecord::create([
+        'record_code' => 'MR001',
+        'patient_id' => $unregistered['authorizedPatient']->id,
+        'doctor_id' => $unregistered['doctor']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam',
+        'diagnosis' => 'Flu',
+        'treatment' => 'Istirahat',
+        'current_hash' => '0x'.str_repeat('a', 64),
+    ]);
+
+    $this->actingAs($unregistered['doctorUser'])
+        ->get(route('dokter.records.index'))
+        ->assertOk()
+        ->assertSee('Akun Belum Terdaftar On-Chain')
+        ->assertDontSee('MR001');
 
     $this->actingAs($unregistered['doctorUser'])
         ->postJson(route('dokter.records.prepare'), [
@@ -248,14 +376,16 @@ it('forbids doctor prepare when doctor is not registered on-chain', function () 
         ->assertForbidden();
 });
 
-it('executes the 2-step prepare-update and update flow and appends an UPDATE log', function () {
+it('executes the 2-step update flow with receipt verification and completely blocks read and edit access once authorization is revoked', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupDoctorAndPatients();
     $service = app(BlockchainService::class);
 
     $initialHash = $service->hashMedicalRecord([
         'record_code' => 'MR001',
-        'patient_id' => $ctx['authorizedPatient']->id,
-        'doctor_id' => $ctx['doctor']->id,
+        'patient_code' => $ctx['authorizedPatient']->patient_code,
+        'doctor_code' => $ctx['doctor']->doctor_code,
         'record_date' => '2026-11-25',
         'complaint' => 'Batuk kering',
         'diagnosis' => 'Bronkitis awal',
@@ -310,32 +440,83 @@ it('executes the 2-step prepare-update and update flow and appends an UPDATE log
     $newHash = $prepareUpdateResponse->json('current_hash');
     $updateTx = '0x'.str_repeat('d', 64);
 
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'result' => dokterFakeRecordReceipt(
+                    $updateTx,
+                    '0xfdaac535c2479f1b829c9d1d754dd8e4739233afe60a0917d08855ef393fa4d9',
+                    'MR001',
+                    $ctx['authorizedPatient']->user->wallet_address,
+                    $ctx['doctorUser']->wallet_address,
+                    '0x'.str_repeat('9', 64),
+                    '0x6ad892',
+                ),
+            ])
+            ->push([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'result' => dokterFakeRecordReceipt(
+                    $updateTx,
+                    '0xfdaac535c2479f1b829c9d1d754dd8e4739233afe60a0917d08855ef393fa4d9',
+                    'MR001',
+                    $ctx['authorizedPatient']->user->wallet_address,
+                    $ctx['doctorUser']->wallet_address,
+                    $newHash,
+                    '0x6ad892',
+                ),
+            ]),
+    ]);
+
+    // First attempt fails receipt hash verification and leaves DB untouched
     $this->actingAs($ctx['doctorUser'])
         ->putJson(route('dokter.records.update', $record), [
             ...$updatePayload,
             'current_hash' => $newHash,
             'tx_hash' => $updateTx,
-            'block_number' => 7000999,
+        ])
+        ->assertUnprocessable();
+
+    expect($record->fresh()->diagnosis)->toBe('Bronkitis awal')
+        ->and($record->fresh()->logBlockchains)->toHaveCount(1);
+
+    // Second attempt passes receipt verification and uses receipt block_number
+    $this->actingAs($ctx['doctorUser'])
+        ->putJson(route('dokter.records.update', $record), [
+            ...$updatePayload,
+            'current_hash' => $newHash,
+            'tx_hash' => $updateTx,
+            'block_number' => 123456,
         ])
         ->assertOk()
-        ->assertJsonPath('log_blockchain.action_type', LogBlockchain::ACTION_UPDATE);
+        ->assertJsonPath('log_blockchain.action_type', LogBlockchain::ACTION_UPDATE)
+        ->assertJsonPath('log_blockchain.block_number', 7002258);
 
     $record->refresh();
     expect($record->diagnosis)->toBe('Bronkitis membaik')
         ->and($record->current_hash)->toBe($newHash)
         ->and($record->logBlockchains)->toHaveCount(2);
 
+    // Revoke authorization: doctor must completely lose both index visibility and edit access
     Authorization::query()
         ->where('patient_id', $ctx['authorizedPatient']->id)
         ->where('doctor_id', $ctx['doctor']->id)
         ->update(['is_authorized' => false]);
 
     $this->actingAs($ctx['doctorUser'])
+        ->get(route('dokter.records.index'))
+        ->assertOk()
+        ->assertDontSee('MR001')
+        ->assertDontSee('Bronkitis membaik');
+
+    $this->actingAs($ctx['doctorUser'])
         ->get(route('dokter.records.edit', $record))
         ->assertForbidden();
 });
 
-it('forbids prepareStore, store, prepareUpdate, and update when patient is not registered on-chain', function () {
+it('forbids index visibility, edit, prepareStore, store, prepareUpdate, and update when patient is not registered on-chain', function () {
     $ctx = setupDoctorAndPatients();
 
     $basePayload = [
@@ -377,12 +558,11 @@ it('forbids prepareStore, store, prepareUpdate, and update when patient is not r
     $this->actingAs($ctx['doctorUser'])
         ->get(route('dokter.records.index'))
         ->assertOk()
-        ->assertSee('Pasien Belum On-Chain');
+        ->assertDontSee('MR901');
 
     $this->actingAs($ctx['doctorUser'])
         ->get(route('dokter.records.edit', $existingRecord))
-        ->assertOk()
-        ->assertSee('Pasien Belum Terdaftar On-Chain');
+        ->assertForbidden();
 
     $this->actingAs($ctx['doctorUser'])
         ->postJson(route('dokter.records.prepare-update', $existingRecord), $basePayload)

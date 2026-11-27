@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Pasien;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdateAuthorizationRequest extends FormRequest
 {
@@ -32,7 +33,12 @@ class UpdateAuthorizationRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'tx_hash' => ['required', 'string', 'regex:/\A0x[a-f0-9]{64}\z/'],
+            'tx_hash' => [
+                'required',
+                'string',
+                'regex:/\A0x[a-f0-9]{64}\z/',
+                Rule::unique('authorizations', 'tx_hash'),
+            ],
         ];
     }
 
@@ -45,6 +51,7 @@ class UpdateAuthorizationRequest extends FormRequest
     {
         return [
             'tx_hash.regex' => 'Format transaction hash Sepolia tidak valid (harus 0x diikuti 64 karakter hex).',
+            'tx_hash.unique' => 'Transaction hash ini sudah tercatat pada riwayat otorisasi lain.',
         ];
     }
 }

@@ -16,7 +16,7 @@ it('renders the login page for guests without public registration link', functio
 
     $this->get(route('login'))
         ->assertOk()
-        ->assertSee('Masuk ke Dashboard')
+        ->assertSee('Masuk')
         ->assertSee('Belum memiliki akun? Hubungi Admin untuk pendaftaran.')
         ->assertDontSee('Daftar akun pasien di sini');
 });

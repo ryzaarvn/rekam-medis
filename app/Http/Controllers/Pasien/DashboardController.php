@@ -48,26 +48,69 @@ class DashboardController extends Controller
             abort(404);
         }
 
-        $medicalRecord->load(['doctor', 'latestLogBlockchain.doctor']);
+        $patient->loadMissing('user');
+        $medicalRecord->load(['patient.user', 'doctor', 'latestLogBlockchain.doctor']);
 
         $recomputedHash = $blockchainService->hashMedicalRecord($medicalRecord);
+        $storedCurrentHash = strtolower($medicalRecord->current_hash);
+        $latestTxHash = $medicalRecord->latestLogBlockchain?->tx_hash;
+        $etherscanUrl = $latestTxHash !== null ? "https://sepolia.etherscan.io/tx/{$latestTxHash}" : null;
 
         try {
             $onchainRecord = $blockchainService->getMedicalRecord($medicalRecord->record_code);
-            $verifiedOnchain = $blockchainService->verifyMedicalRecord($medicalRecord->record_code, $recomputedHash);
         } catch (BlockchainException $exception) {
+            $isNotFoundOnchain = $exception->revertReason() === 'Rekam medis tidak ditemukan'
+                || str_contains($exception->getMessage(), 'Rekam medis tidak ditemukan');
+
+            if ($isNotFoundOnchain) {
+                $fallbackDoctor = $medicalRecord->latestLogBlockchain?->doctor ?? $medicalRecord->doctor;
+                $lastDoctorName = $fallbackDoctor !== null
+                    ? "{$fallbackDoctor->full_name} ({$fallbackDoctor->doctor_code})"
+                    : '-';
+
+                return response()->json([
+                    'is_valid' => false,
+                    'status' => 'not_found_onchain',
+                    'message' => 'Rekam medis belum tercatat di smart contract Sepolia.',
+                    'record_code' => $medicalRecord->record_code,
+                    'recomputed_hash' => $recomputedHash,
+                    'stored_current_hash' => $storedCurrentHash,
+                    'onchain_hash' => null,
+                    'onchain_patient' => null,
+                    'patient_wallet_matched' => false,
+                    'onchain_doctor' => null,
+                    'onchain_timestamp' => null,
+                    'onchain_timestamp_formatted' => '-',
+                    'last_doctor_name' => $lastDoctorName,
+                    'latest_tx_hash' => $latestTxHash,
+                    'etherscan_url' => $etherscanUrl,
+                ]);
+            }
+
             return response()->json([
                 'message' => $exception->getMessage(),
             ], 502);
         }
 
         $onchainHash = strtolower($onchainRecord['record_hash']);
-        $storedCurrentHash = strtolower($medicalRecord->current_hash);
-        $isValid = $verifiedOnchain
-            && hash_equals($onchainHash, $recomputedHash)
-            && hash_equals($storedCurrentHash, $recomputedHash);
-
+        $onchainPatient = strtolower($onchainRecord['patient']);
         $onchainDoctorAddress = strtolower($onchainRecord['doctor']);
+        $patientWalletMatched = hash_equals($onchainPatient, strtolower($patient->user->wallet_address));
+
+        $isValid = hash_equals($onchainHash, $recomputedHash)
+            && hash_equals($storedCurrentHash, $recomputedHash)
+            && $patientWalletMatched;
+
+        $status = $isValid
+            ? 'valid'
+            : (! $patientWalletMatched ? 'patient_mismatch' : 'tampered');
+
+        $message = match ($status) {
+            'valid' => 'Hash SHA-256 dan pemilik rekam medis cocok dengan catatan Smart Contract Sepolia.',
+            'patient_mismatch' => 'Alamat wallet pasien pada Smart Contract Sepolia tidak cocok dengan wallet akun Anda.',
+            default => 'Isi rekam medis di database tidak sesuai dengan catatan asli di Blockchain Sepolia.',
+        };
+
         $matchedDoctor = Doctor::query()
             ->whereHas('user', fn ($query) => $query->where('wallet_address', $onchainDoctorAddress))
             ->first()
@@ -78,16 +121,18 @@ class DashboardController extends Controller
             ? "{$matchedDoctor->full_name} ({$matchedDoctor->doctor_code})"
             : $onchainDoctorAddress;
 
-        $latestTxHash = $medicalRecord->latestLogBlockchain?->tx_hash;
         $timestamp = (int) $onchainRecord['timestamp'];
 
         return response()->json([
             'is_valid' => $isValid,
+            'status' => $status,
+            'message' => $message,
             'record_code' => $medicalRecord->record_code,
             'recomputed_hash' => $recomputedHash,
             'stored_current_hash' => $storedCurrentHash,
             'onchain_hash' => $onchainHash,
-            'onchain_patient' => strtolower($onchainRecord['patient']),
+            'onchain_patient' => $onchainPatient,
+            'patient_wallet_matched' => $patientWalletMatched,
             'onchain_doctor' => $onchainDoctorAddress,
             'onchain_timestamp' => $timestamp,
             'onchain_timestamp_formatted' => $timestamp > 0
@@ -95,7 +140,7 @@ class DashboardController extends Controller
                 : '-',
             'last_doctor_name' => $lastDoctorName,
             'latest_tx_hash' => $latestTxHash,
-            'etherscan_url' => $latestTxHash !== null ? "https://sepolia.etherscan.io/tx/{$latestTxHash}" : null,
+            'etherscan_url' => $etherscanUrl,
         ]);
     }
 

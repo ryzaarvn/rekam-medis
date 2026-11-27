@@ -18,10 +18,22 @@
     </div>
 
     <div class="panel-card">
+        @if (!$doctor->is_registered_onchain)
+            <div class="alert alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Akun Belum Terdaftar On-Chain:</strong> Akun dokter Anda belum terdaftar aktif on-chain oleh Admin,
+                sehingga akses daftar dan pembaruan rekam medis pasien dinonaktifkan.
+            </div>
+        @endif
+
         @if ($records->isEmpty())
             <div class="text-center py-4 text-muted">
                 <i class="bi bi-journal-x fs-3 d-block mb-2"></i>
-                Belum ada pemeriksaan yang Anda lakukan.
+                @if (!$doctor->is_registered_onchain)
+                    Daftar rekam medis tidak tersedia selama akun dokter belum aktif on-chain.
+                @else
+                    Belum ada rekam medis dari pasien yang memberikan izin aktif kepada Anda saat ini.
+                @endif
             </div>
         @else
             @php

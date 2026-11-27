@@ -17,6 +17,7 @@ class BlockchainException extends RuntimeException
         private readonly array $errorContext = [],
         int $code = 0,
         ?Throwable $previous = null,
+        private readonly int $httpStatus = 502,
     ) {
         parent::__construct($message, $code, $previous);
     }
@@ -29,11 +30,14 @@ class BlockchainException extends RuntimeException
         return new self(
             "Konfigurasi blockchain [{$configKey}] belum diatur atau tidak valid.",
             ['config_key' => $configKey],
+            0,
+            null,
+            502,
         );
     }
 
     /**
-     * Create an exception when an outbound JSON-RPC request fails at the transport layer.
+     * Create an exception when an outbound JSON-RPC request fails at the transport or HTTP layer.
      */
     public static function rpcTransportFailed(string $method, string $reason, ?Throwable $previous = null): self
     {
@@ -42,6 +46,7 @@ class BlockchainException extends RuntimeException
             ['method' => $method],
             0,
             $previous,
+            502,
         );
     }
 
@@ -66,6 +71,9 @@ class BlockchainException extends RuntimeException
                 'rpc_message' => $rpcMessage,
                 'revert_reason' => $revertReason,
             ],
+            0,
+            null,
+            502,
         );
     }
 
@@ -77,7 +85,44 @@ class BlockchainException extends RuntimeException
         return new self(
             "Respons RPC tidak valid untuk {$method}: {$reason}",
             ['method' => $method],
+            0,
+            null,
+            502,
         );
+    }
+
+    /**
+     * Create an exception when on-chain transaction receipt, event log, or state verification fails.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    public static function verificationFailed(string $method, string $reason, array $context = []): self
+    {
+        return new self(
+            $reason,
+            ['method' => $method, ...$context],
+            0,
+            null,
+            422,
+        );
+    }
+
+    /**
+     * Get the recommended HTTP status code for JSON error responses.
+     */
+    public function getHttpStatus(): int
+    {
+        return $this->httpStatus;
+    }
+
+    /**
+     * Get the decoded Solidity revert reason when available.
+     */
+    public function revertReason(): ?string
+    {
+        $reason = $this->errorContext['revert_reason'] ?? null;
+
+        return is_string($reason) && $reason !== '' ? $reason : null;
     }
 
     /**

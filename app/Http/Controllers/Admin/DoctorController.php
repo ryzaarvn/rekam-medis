@@ -2,16 +2,19 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Exceptions\BlockchainException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreDoctorRequest;
+use App\Http\Requests\Admin\SyncDoctorDeactivateRequest;
 use App\Http\Requests\Admin\SyncDoctorOnchainRequest;
 use App\Http\Requests\Admin\UpdateDoctorRequest;
+use App\Models\Authorization;
 use App\Models\Doctor;
 use App\Models\User;
+use App\Services\BlockchainService;
 use App\Support\CodeGenerator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 
@@ -77,9 +80,18 @@ class DoctorController extends Controller
         $validated = $request->validated();
         $doctor->load('user');
 
-        DB::transaction(function () use ($doctor, $validated): void {
-            $walletChanged = strtolower($doctor->user->wallet_address) !== $validated['wallet_address'];
+        $walletChanged = strtolower($doctor->user->wallet_address) !== $validated['wallet_address'];
 
+        if ($doctor->is_registered_onchain && $walletChanged) {
+            $warningMessage = 'Alamat wallet tidak dapat diubah saat akun masih aktif di blockchain Sepolia. Nonaktifkan akun dari blockchain terlebih dahulu agar tidak meninggalkan state aktif di smart contract.';
+
+            return redirect()->route('admin.doctors.index')
+                ->withInput()
+                ->with('warning', $warningMessage)
+                ->withErrors(['wallet_address' => $warningMessage]);
+        }
+
+        DB::transaction(function () use ($doctor, $validated, $walletChanged): void {
             $userAttributes = [
                 'username' => $validated['username'],
                 'email' => $validated['email'] ?? null,
@@ -112,10 +124,15 @@ class DoctorController extends Controller
     }
 
     /**
-     * Delete a doctor profile and user account when no medical records or logs exist.
+     * Delete a doctor profile and user account after verifying inactive on-chain status and no history.
      */
     public function destroy(Doctor $doctor): RedirectResponse
     {
+        if ($doctor->is_registered_onchain) {
+            return redirect()->route('admin.doctors.index')
+                ->with('warning', 'Akun masih aktif di blockchain Sepolia. Nonaktifkan on-chain terlebih dahulu sebelum menghapus data.');
+        }
+
         if ($doctor->medicalRecords()->exists() || $doctor->logBlockchains()->exists()) {
             return redirect()->route('admin.doctors.index')
                 ->with('error', "Dokter {$doctor->full_name} tidak dapat dihapus karena sudah memiliki riwayat rekam medis atau log blockchain.");
@@ -135,11 +152,29 @@ class DoctorController extends Controller
     }
 
     /**
-     * Persist Sepolia addDoctor() registration transaction hash for the doctor.
+     * Verify addDoctor() receipt and event on Sepolia before persisting on-chain registration state.
      */
-    public function registerOnchain(SyncDoctorOnchainRequest $request, Doctor $doctor): JsonResponse|RedirectResponse
-    {
+    public function registerOnchain(
+        SyncDoctorOnchainRequest $request,
+        Doctor $doctor,
+        BlockchainService $blockchainService,
+    ): JsonResponse|RedirectResponse {
         $validated = $request->validated();
+        $doctor->loadMissing('user');
+
+        try {
+            $blockchainService->verifyDoctorAddedTransaction(
+                $validated['registration_tx_hash'],
+                $request->user()->wallet_address,
+                $doctor->user->wallet_address,
+            );
+        } catch (BlockchainException $exception) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $exception->getMessage()], $exception->getHttpStatus());
+            }
+
+            return redirect()->route('admin.doctors.index')->with('error', $exception->getMessage());
+        }
 
         $doctor->update([
             'is_registered_onchain' => true,
@@ -160,20 +195,51 @@ class DoctorController extends Controller
     }
 
     /**
-     * Mark a doctor inactive on-chain after removeDoctor() succeeds on Sepolia.
+     * Verify removeDoctor() on Sepolia, deactivate doctor on-chain, and revoke all active off-chain authorizations.
      */
-    public function deactivateOnchain(Request $request, Doctor $doctor): JsonResponse|RedirectResponse
-    {
-        $doctor->update([
-            'is_registered_onchain' => false,
-        ]);
+    public function deactivateOnchain(
+        SyncDoctorDeactivateRequest $request,
+        Doctor $doctor,
+        BlockchainService $blockchainService,
+    ): JsonResponse|RedirectResponse {
+        $validated = $request->validated();
+        $doctor->loadMissing('user');
 
-        $message = "Status on-chain dokter {$doctor->full_name} ({$doctor->doctor_code}) berhasil dinonaktifkan.";
+        try {
+            $blockchainService->verifyDoctorRemovedTransaction(
+                $validated['tx_hash'],
+                $request->user()->wallet_address,
+                $doctor->user->wallet_address,
+            );
+        } catch (BlockchainException $exception) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $exception->getMessage()], $exception->getHttpStatus());
+            }
+
+            return redirect()->route('admin.doctors.index')->with('error', $exception->getMessage());
+        }
+
+        DB::transaction(function () use ($doctor): void {
+            $doctor->update([
+                'is_registered_onchain' => false,
+            ]);
+
+            Authorization::query()
+                ->where('doctor_id', $doctor->id)
+                ->where('is_authorized', true)
+                ->update([
+                    'is_authorized' => false,
+                    'tx_hash' => null,
+                ]);
+        });
+
+        $message = "Status on-chain dokter {$doctor->full_name} ({$doctor->doctor_code}) berhasil dinonaktifkan dan seluruh otorisasi aktif diputus.";
 
         if ($request->expectsJson()) {
             return response()->json([
                 'message' => $message,
                 'doctor' => $doctor->fresh('user'),
+                'etherscan_url' => "https://sepolia.etherscan.io/tx/{$validated['tx_hash']}",
             ]);
         }
 

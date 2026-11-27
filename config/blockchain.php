@@ -67,4 +67,18 @@ return [
 
     'rpc_timeout' => (int) env('BLOCKCHAIN_RPC_TIMEOUT', 10),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Transaction Receipt Polling Settings
+    |--------------------------------------------------------------------------
+    |
+    | Short retry configuration when eth_getTransactionReceipt temporarily
+    | returns null right after MetaMask transaction mining.
+    |
+    */
+
+    'receipt_max_attempts' => (int) env('BLOCKCHAIN_RECEIPT_MAX_ATTEMPTS', 3),
+
+    'receipt_retry_delay_ms' => (int) env('BLOCKCHAIN_RECEIPT_RETRY_DELAY_MS', 500),
+
 ];

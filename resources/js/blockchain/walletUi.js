@@ -110,6 +110,8 @@ export async function sendJsonRequest(url, method = 'POST', payload = {}) {
     return data;
 }
 
+const FLASH_ALERT_STORAGE_KEY = 'erm_flash_alert';
+
 export function showAlertBox(container, type, message, etherscanUrl = null) {
     if (!container) {
         return;
@@ -130,6 +132,54 @@ export function showAlertBox(container, type, message, etherscanUrl = null) {
         link.className = 'alert-link ms-2';
         link.textContent = 'Lihat di Sepolia Etherscan';
         container.appendChild(link);
+    }
+}
+
+export function saveFlashAlert({ type = 'success', message, etherscanUrl = null }) {
+    if (!message || typeof window === 'undefined' || !window.sessionStorage) {
+        return;
+    }
+
+    try {
+        window.sessionStorage.setItem(
+            FLASH_ALERT_STORAGE_KEY,
+            JSON.stringify({ type, message, etherscanUrl }),
+        );
+    } catch {
+        // Ignore storage errors in restricted browsing contexts.
+    }
+}
+
+export function consumeFlashAlert(container) {
+    if (!container || typeof window === 'undefined' || !window.sessionStorage) {
+        return;
+    }
+
+    let raw = null;
+    try {
+        raw = window.sessionStorage.getItem(FLASH_ALERT_STORAGE_KEY);
+        if (raw !== null) {
+            window.sessionStorage.removeItem(FLASH_ALERT_STORAGE_KEY);
+        }
+    } catch {
+        return;
+    }
+
+    if (!raw) {
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed.message !== 'string' || parsed.message === '') {
+            return;
+        }
+
+        const allowedTypes = new Set(['success', 'danger', 'warning', 'info']);
+        const type = allowedTypes.has(parsed.type) ? parsed.type : 'success';
+        showAlertBox(container, type, parsed.message, parsed.etherscanUrl ?? null);
+    } catch {
+        // Ignore malformed flash payloads.
     }
 }
 

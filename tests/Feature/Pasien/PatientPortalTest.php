@@ -1,6 +1,5 @@
 <?php
 
-use App\Exceptions\BlockchainException;
 use App\Models\Authorization;
 use App\Models\Doctor;
 use App\Models\LogBlockchain;
@@ -9,8 +8,18 @@ use App\Models\Patient;
 use App\Models\User;
 use App\Services\BlockchainService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Config::set('blockchain.chain_id', 11155111);
+    Config::set('blockchain.contract_address', '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4');
+    Config::set('blockchain.rpc_url', 'https://eth-sepolia.example.test/v2/test-key');
+    Config::set('blockchain.receipt_max_attempts', 1);
+    Config::set('blockchain.receipt_retry_delay_ms', 0);
+});
 
 function setupPatientPortalScenario(): array
 {
@@ -99,7 +108,47 @@ function setupPatientPortalScenario(): array
     );
 }
 
-it('lists only active on-chain doctors and grants or revokes authorization with lowercase tx_hash', function () {
+function pasienFakeAccessReceipt(
+    string $txHash,
+    string $topic0,
+    string $patientWallet,
+    string $doctorWallet,
+    string $status = '0x1',
+): array {
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+    $paddedPatient = '0x'.str_pad(substr(strtolower($patientWallet), 2), 64, '0', STR_PAD_LEFT);
+    $paddedDoctor = '0x'.str_pad(substr(strtolower($doctorWallet), 2), 64, '0', STR_PAD_LEFT);
+
+    return [
+        'transactionHash' => strtolower($txHash),
+        'from' => strtolower($patientWallet),
+        'to' => $contract,
+        'status' => $status,
+        'blockNumber' => '0x6ad3c2',
+        'logs' => [[
+            'address' => $contract,
+            'topics' => [$topic0, $paddedPatient, $paddedDoctor],
+            'data' => '0x',
+        ]],
+    ];
+}
+
+function pasienEncodeGetMedicalRecordAbi(
+    string $recordHash,
+    string $patientWallet,
+    string $doctorWallet,
+    int $timestamp = 1795680000,
+): string {
+    return '0x'
+        .substr(strtolower($recordHash), 2)
+        .str_pad(substr(strtolower($patientWallet), 2), 64, '0', STR_PAD_LEFT)
+        .str_pad(substr(strtolower($doctorWallet), 2), 64, '0', STR_PAD_LEFT)
+        .str_pad(dechex($timestamp), 64, '0', STR_PAD_LEFT);
+}
+
+it('lists only active on-chain doctors, verifies grant/revoke receipts, and prevents tx_hash replay', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupPatientPortalScenario();
 
     $this->actingAs($ctx['patientUser'])
@@ -109,6 +158,34 @@ it('lists only active on-chain doctors and grants or revokes authorization with 
         ->assertDontSee('Dr. Belum Onchain');
 
     $grantTx = '0x'.str_repeat('A', 64);
+    $revokeTx = '0x'.str_repeat('B', 64);
+    $badReceiptTx = '0x'.str_repeat('C', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => pasienFakeAccessReceipt(
+                $grantTx,
+                '0x9f520b3bfc56d06f7065d10b4683b3f57ac8895d5026cd176dee95ce1454cb8d',
+                $ctx['patientUser']->wallet_address,
+                $ctx['activeDoctor']->user->wallet_address,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 63).'1'])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => pasienFakeAccessReceipt(
+                $revokeTx,
+                '0x825c8be24eb0df19500f63e86c29e7d0d951e73056b889b891d85e40938d9b6e',
+                $ctx['patientUser']->wallet_address,
+                $ctx['activeDoctor']->user->wallet_address,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 64)])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => pasienFakeAccessReceipt(
+                $badReceiptTx,
+                '0x9f520b3bfc56d06f7065d10b4683b3f57ac8895d5026cd176dee95ce1454cb8d',
+                $ctx['patientUser']->wallet_address,
+                $ctx['activeDoctor']->user->wallet_address,
+                '0x0',
+            )]),
+    ]);
+
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.authorizations.grant', $ctx['activeDoctor']), [
             'tx_hash' => $grantTx,
@@ -124,7 +201,6 @@ it('lists only active on-chain doctors and grants or revokes authorization with 
     expect($authorization->is_authorized)->toBeTrue()
         ->and($authorization->tx_hash)->toBe(strtolower($grantTx));
 
-    $revokeTx = '0x'.str_repeat('B', 64);
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.authorizations.revoke', $ctx['activeDoctor']), [
             'tx_hash' => $revokeTx,
@@ -135,9 +211,27 @@ it('lists only active on-chain doctors and grants or revokes authorization with 
     expect($authorization->fresh()->is_authorized)->toBeFalse()
         ->and($authorization->fresh()->tx_hash)->toBe(strtolower($revokeTx));
 
+    // Reject replaying an already-recorded tx_hash
+    $this->actingAs($ctx['patientUser'])
+        ->postJson(route('pasien.authorizations.grant', $ctx['activeDoctor']), [
+            'tx_hash' => $grantTx,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('tx_hash');
+
+    // Reject reverted receipt without altering authorization state
+    $this->actingAs($ctx['patientUser'])
+        ->postJson(route('pasien.authorizations.grant', $ctx['activeDoctor']), [
+            'tx_hash' => $badReceiptTx,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonStructure(['message']);
+
+    expect($authorization->fresh()->is_authorized)->toBeFalse();
+
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.authorizations.grant', $ctx['pendingDoctor']), [
-            'tx_hash' => '0x'.str_repeat('c', 64),
+            'tx_hash' => '0x'.str_repeat('d', 64),
         ])
         ->assertUnprocessable();
 });
@@ -189,8 +283,8 @@ it('restricts patient dashboard medical records to the logged-in patient and hid
 
     $ownHash = $service->hashMedicalRecord([
         'record_code' => 'MR001',
-        'patient_id' => $ctx['patient']->id,
-        'doctor_id' => $ctx['activeDoctor']->id,
+        'patient_code' => $ctx['patient']->patient_code,
+        'doctor_code' => $ctx['activeDoctor']->doctor_code,
         'record_date' => '2026-11-26',
         'complaint' => 'Batuk',
         'diagnosis' => 'ISPA <script>alert("xss")</script>',
@@ -224,6 +318,7 @@ it('restricts patient dashboard medical records to the logged-in patient and hid
         ->get(route('pasien.dashboard'))
         ->assertOk()
         ->assertSee('MR001')
+        ->assertSee('Dokter Terakhir')
         ->assertSee('&lt;script&gt;', false)
         ->assertDontSee('<script>alert("xss")</script>', false)
         ->assertDontSee('MR002')
@@ -234,14 +329,16 @@ it('restricts patient dashboard medical records to the logged-in patient and hid
         ->assertNotFound();
 });
 
-it('verifies a valid medical record against mocked Sepolia BlockchainService', function () {
+it('verifies a VALID medical record using a single getMedicalRecord eth_call when hashes and patient wallet match', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupPatientPortalScenario();
     $realService = app(BlockchainService::class);
 
     $canonicalHash = $realService->hashMedicalRecord([
         'record_code' => 'MR001',
-        'patient_id' => $ctx['patient']->id,
-        'doctor_id' => $ctx['activeDoctor']->id,
+        'patient_code' => $ctx['patient']->patient_code,
+        'doctor_code' => $ctx['activeDoctor']->doctor_code,
         'record_date' => '2026-11-26',
         'complaint' => 'Demam dan sakit kepala',
         'diagnosis' => 'Demam Berdarah Ringan',
@@ -271,22 +368,18 @@ it('verifies a valid medical record against mocked Sepolia BlockchainService', f
         'action_type' => LogBlockchain::ACTION_CREATE,
     ]);
 
-    $mock = Mockery::mock(BlockchainService::class)->makePartial();
-    $mock->shouldReceive('getMedicalRecord')
-        ->once()
-        ->with('MR001')
-        ->andReturn([
-            'record_hash' => $canonicalHash,
-            'patient' => $ctx['patientUser']->wallet_address,
-            'doctor' => $ctx['activeDoctor']->user->wallet_address,
-            'timestamp' => 1795680000,
-        ]);
-    $mock->shouldReceive('verifyMedicalRecord')
-        ->once()
-        ->with('MR001', $canonicalHash)
-        ->andReturn(true);
-
-    $this->app->instance(BlockchainService::class, $mock);
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => pasienEncodeGetMedicalRecordAbi(
+                $canonicalHash,
+                $ctx['patientUser']->wallet_address,
+                $ctx['activeDoctor']->user->wallet_address,
+                1795680000,
+            ),
+        ]),
+    ]);
 
     $response = $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.records.verify', $record));
@@ -294,26 +387,33 @@ it('verifies a valid medical record against mocked Sepolia BlockchainService', f
     $response->assertOk()
         ->assertJson([
             'is_valid' => true,
+            'status' => 'valid',
             'record_code' => 'MR001',
             'recomputed_hash' => $canonicalHash,
             'stored_current_hash' => $canonicalHash,
             'onchain_hash' => $canonicalHash,
+            'onchain_patient' => $ctx['patientUser']->wallet_address,
+            'patient_wallet_matched' => true,
             'onchain_doctor' => $ctx['activeDoctor']->user->wallet_address,
             'onchain_timestamp' => 1795680000,
             'last_doctor_name' => 'Dr. Andi Wijaya (DOC001)',
             'latest_tx_hash' => $latestTxHash,
             'etherscan_url' => "https://sepolia.etherscan.io/tx/{$latestTxHash}",
         ]);
+
+    Http::assertSentCount(1);
 });
 
-it('detects tampered off-chain medical record data against mocked Sepolia BlockchainService', function () {
+it('detects TAMPERED off-chain medical record data during patient verification', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupPatientPortalScenario();
     $realService = app(BlockchainService::class);
 
     $originalHash = $realService->hashMedicalRecord([
         'record_code' => 'MR002',
-        'patient_id' => $ctx['patient']->id,
-        'doctor_id' => $ctx['activeDoctor']->id,
+        'patient_code' => $ctx['patient']->patient_code,
+        'doctor_code' => $ctx['activeDoctor']->doctor_code,
         'record_date' => '2026-11-26',
         'complaint' => 'Batuk ringan',
         'diagnosis' => 'ISPA',
@@ -344,24 +444,20 @@ it('detects tampered off-chain medical record data against mocked Sepolia Blockc
 
     // Simulate tampering directly in database without updating on-chain hash.
     $record->update(['diagnosis' => 'DIAGNOSIS DIMANIPULASI']);
-    $tamperedRecomputedHash = $realService->hashMedicalRecord($record->fresh());
+    $tamperedRecomputedHash = $realService->hashMedicalRecord($record->fresh(['patient', 'doctor']));
 
-    $mock = Mockery::mock(BlockchainService::class)->makePartial();
-    $mock->shouldReceive('getMedicalRecord')
-        ->once()
-        ->with('MR002')
-        ->andReturn([
-            'record_hash' => $originalHash,
-            'patient' => $ctx['patientUser']->wallet_address,
-            'doctor' => $ctx['activeDoctor']->user->wallet_address,
-            'timestamp' => 1795681000,
-        ]);
-    $mock->shouldReceive('verifyMedicalRecord')
-        ->once()
-        ->with('MR002', $tamperedRecomputedHash)
-        ->andReturn(false);
-
-    $this->app->instance(BlockchainService::class, $mock);
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => pasienEncodeGetMedicalRecordAbi(
+                $originalHash,
+                $ctx['patientUser']->wallet_address,
+                $ctx['activeDoctor']->user->wallet_address,
+                1795681000,
+            ),
+        ]),
+    ]);
 
     $response = $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.records.verify', $record));
@@ -369,19 +465,143 @@ it('detects tampered off-chain medical record data against mocked Sepolia Blockc
     $response->assertOk()
         ->assertJson([
             'is_valid' => false,
+            'status' => 'tampered',
             'record_code' => 'MR002',
             'recomputed_hash' => $tamperedRecomputedHash,
             'stored_current_hash' => $originalHash,
             'onchain_hash' => $originalHash,
+            'onchain_patient' => $ctx['patientUser']->wallet_address,
+            'patient_wallet_matched' => true,
             'last_doctor_name' => 'Dr. Andi Wijaya (DOC001)',
             'latest_tx_hash' => $latestTxHash,
         ]);
+
+    Http::assertSentCount(1);
 });
 
-it('returns a 502 error response when Sepolia RPC verification fails', function () {
+it('detects PATIENT MISMATCH when on-chain patient wallet differs from logged-in patient wallet', function () {
+    Http::preventStrayRequests();
+
     $ctx = setupPatientPortalScenario();
+    $realService = app(BlockchainService::class);
+
+    $canonicalHash = $realService->hashMedicalRecord([
+        'record_code' => 'MR003',
+        'patient_code' => $ctx['patient']->patient_code,
+        'doctor_code' => $ctx['activeDoctor']->doctor_code,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Nyeri otot',
+        'diagnosis' => 'Myalgia',
+        'treatment' => 'Ibuprofen',
+        'notes' => null,
+    ]);
+
     $record = MedicalRecord::create([
         'record_code' => 'MR003',
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Nyeri otot',
+        'diagnosis' => 'Myalgia',
+        'treatment' => 'Ibuprofen',
+        'current_hash' => $canonicalHash,
+    ]);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'result' => pasienEncodeGetMedicalRecordAbi(
+                $canonicalHash,
+                $ctx['otherPatientUser']->wallet_address,
+                $ctx['activeDoctor']->user->wallet_address,
+                1795682000,
+            ),
+        ]),
+    ]);
+
+    $this->actingAs($ctx['patientUser'])
+        ->postJson(route('pasien.records.verify', $record))
+        ->assertOk()
+        ->assertJson([
+            'is_valid' => false,
+            'status' => 'patient_mismatch',
+            'record_code' => 'MR003',
+            'recomputed_hash' => $canonicalHash,
+            'stored_current_hash' => $canonicalHash,
+            'onchain_hash' => $canonicalHash,
+            'onchain_patient' => $ctx['otherPatientUser']->wallet_address,
+            'patient_wallet_matched' => false,
+        ]);
+});
+
+it('returns HTTP 200 with status not_found_onchain when smart contract reverts with Rekam medis tidak ditemukan', function () {
+    Http::preventStrayRequests();
+
+    $ctx = setupPatientPortalScenario();
+    $realService = app(BlockchainService::class);
+
+    $canonicalHash = $realService->hashMedicalRecord([
+        'record_code' => 'MR004',
+        'patient_code' => $ctx['patient']->patient_code,
+        'doctor_code' => $ctx['activeDoctor']->doctor_code,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Pusing',
+        'diagnosis' => 'Vertigo',
+        'treatment' => 'Betahistine',
+        'notes' => null,
+    ]);
+
+    $record = MedicalRecord::create([
+        'record_code' => 'MR004',
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Pusing',
+        'diagnosis' => 'Vertigo',
+        'treatment' => 'Betahistine',
+        'current_hash' => $canonicalHash,
+    ]);
+
+    $revertData = '0x08c379a0'
+        .'0000000000000000000000000000000000000000000000000000000000000020'
+        .'000000000000000000000000000000000000000000000000000000000000001b'
+        .'52656b616d206d6564697320746964616b20646974656d756b616e0000000000';
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'error' => [
+                'code' => 3,
+                'message' => 'execution reverted',
+                'data' => $revertData,
+            ],
+        ]),
+    ]);
+
+    $this->actingAs($ctx['patientUser'])
+        ->postJson(route('pasien.records.verify', $record))
+        ->assertOk()
+        ->assertJson([
+            'is_valid' => false,
+            'status' => 'not_found_onchain',
+            'message' => 'Rekam medis belum tercatat di smart contract Sepolia.',
+            'record_code' => 'MR004',
+            'recomputed_hash' => $canonicalHash,
+            'stored_current_hash' => $canonicalHash,
+            'onchain_hash' => null,
+            'onchain_patient' => null,
+            'patient_wallet_matched' => false,
+        ]);
+});
+
+it('returns a clean 502 JSON error response when Sepolia RPC returns HTML 502 Bad Gateway', function () {
+    Http::preventStrayRequests();
+
+    $ctx = setupPatientPortalScenario();
+    $record = MedicalRecord::create([
+        'record_code' => 'MR005',
         'patient_id' => $ctx['patient']->id,
         'doctor_id' => $ctx['activeDoctor']->id,
         'record_date' => '2026-11-26',
@@ -391,13 +611,13 @@ it('returns a 502 error response when Sepolia RPC verification fails', function 
         'current_hash' => '0x'.str_repeat('5', 64),
     ]);
 
-    $mock = Mockery::mock(BlockchainService::class)->makePartial();
-    $mock->shouldReceive('getMedicalRecord')
-        ->once()
-        ->with('MR003')
-        ->andThrow(BlockchainException::rpcTransportFailed('getMedicalRecord', 'Connection timed out'));
-
-    $this->app->instance(BlockchainService::class, $mock);
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response(
+            '<html><body><h1>502 Bad Gateway</h1></body></html>',
+            502,
+            ['Content-Type' => 'text/html'],
+        ),
+    ]);
 
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.records.verify', $record))

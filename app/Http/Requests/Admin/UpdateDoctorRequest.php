@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Models\Doctor;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -45,6 +46,7 @@ class UpdateDoctorRequest extends FormRequest
     {
         /** @var Doctor $doctor */
         $doctor = $this->route('doctor');
+        $adminWallet = strtolower(trim((string) config('blockchain.admin_wallet_address', '')));
 
         return [
             'doctor_code' => ['required', 'string', 'max:20', 'regex:/\A[\x21-\x7E]+\z/', Rule::unique('doctors', 'doctor_code')->ignore($doctor->id)],
@@ -54,7 +56,17 @@ class UpdateDoctorRequest extends FormRequest
             'username' => ['required', 'string', 'min:3', 'max:50', 'regex:/\A[a-zA-Z0-9_.-]+\z/', Rule::unique('users', 'username')->ignore($doctor->user_id)],
             'email' => ['nullable', 'email', 'max:100', Rule::unique('users', 'email')->ignore($doctor->user_id)],
             'password' => ['nullable', 'string', 'min:8'],
-            'wallet_address' => ['required', 'string', 'regex:/\A0x[a-f0-9]{40}\z/', Rule::unique('users', 'wallet_address')->ignore($doctor->user_id)],
+            'wallet_address' => [
+                'required',
+                'string',
+                'regex:/\A0x[a-f0-9]{40}\z/',
+                Rule::unique('users', 'wallet_address')->ignore($doctor->user_id),
+                function (string $attribute, mixed $value, Closure $fail) use ($adminWallet): void {
+                    if ($adminWallet !== '' && is_string($value) && strtolower($value) === $adminWallet) {
+                        $fail('Alamat wallet Admin smart contract tidak dapat didaftarkan sebagai dokter.');
+                    }
+                },
+            ],
         ];
     }
 

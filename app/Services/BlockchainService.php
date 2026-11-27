@@ -9,6 +9,7 @@ use DateTimeInterface;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Sleep;
 use InvalidArgumentException;
 use Throwable;
 
@@ -32,6 +33,25 @@ class BlockchainService
     private const SELECTOR_ERROR_STRING = '08c379a0';
 
     /**
+     * Keccak-256 topic0 event signatures verified via ethers.id() against resources/js/abi/HealthcareRecord.json.
+     */
+    private const TOPIC_DOCTOR_ADDED = '0x69908b2e63170aa89ef89719bbe3b4c92cccc38653968ab25f4464eff7c28ac8';
+
+    private const TOPIC_DOCTOR_REMOVED = '0x493d7cf6a7c880406a55654d6727464ea088bd01d40498e1987a327e68961ab8';
+
+    private const TOPIC_PATIENT_ADDED = '0xa58cff07db0adda3ab7a40bd2f18ab57210bf38391a52ffd2e8eee6b8bdec71a';
+
+    private const TOPIC_PATIENT_REMOVED = '0x053a4badf166f01c4b02f6bcb71d2d67734470d0866282e291e73001aa25c769';
+
+    private const TOPIC_ACCESS_GRANTED = '0x9f520b3bfc56d06f7065d10b4683b3f57ac8895d5026cd176dee95ce1454cb8d';
+
+    private const TOPIC_ACCESS_REVOKED = '0x825c8be24eb0df19500f63e86c29e7d0d951e73056b889b891d85e40938d9b6e';
+
+    private const TOPIC_MEDICAL_RECORD_ADDED = '0x30ce74f24973c3793a1a44ecce360de22f3a981e9e7a4b1aed68c6c3611d54a2';
+
+    private const TOPIC_MEDICAL_RECORD_UPDATED = '0xfdaac535c2479f1b829c9d1d754dd8e4739233afe60a0917d08855ef393fa4d9';
+
+    /**
      * Create a new blockchain service instance.
      */
     public function __construct(
@@ -40,6 +60,8 @@ class BlockchainService
         private ?int $chainId = null,
         private ?int $rpcConnectTimeout = null,
         private ?int $rpcTimeout = null,
+        private ?int $receiptMaxAttempts = null,
+        private ?int $receiptRetryDelayMs = null,
     ) {}
 
     /**
@@ -103,15 +125,15 @@ class BlockchainService
     }
 
     /**
-     * Build the deterministic canonical payload array for a medical record.
+     * Build the deterministic canonical payload array for a medical record using stable domain codes.
      *
      * @param  MedicalRecord|array<string, mixed>  $record
      * @return array{
      *     complaint: string,
      *     diagnosis: string,
-     *     doctor_id: int,
+     *     doctor_code: string,
      *     notes: string|null,
-     *     patient_id: int,
+     *     patient_code: string,
      *     record_code: string,
      *     record_date: string,
      *     treatment: string
@@ -119,16 +141,22 @@ class BlockchainService
      */
     public function buildCanonicalPayload(MedicalRecord|array $record): array
     {
-        $data = $record instanceof MedicalRecord ? [
-            'record_code' => $record->record_code,
-            'patient_id' => $record->patient_id,
-            'doctor_id' => $record->doctor_id,
-            'record_date' => $record->record_date,
-            'complaint' => $record->complaint,
-            'diagnosis' => $record->diagnosis,
-            'treatment' => $record->treatment,
-            'notes' => $record->notes,
-        ] : $record;
+        if ($record instanceof MedicalRecord) {
+            $record->loadMissing(['patient', 'doctor']);
+
+            $data = [
+                'record_code' => $record->record_code,
+                'patient_code' => $record->patient?->patient_code,
+                'doctor_code' => $record->doctor?->doctor_code,
+                'record_date' => $record->record_date,
+                'complaint' => $record->complaint,
+                'diagnosis' => $record->diagnosis,
+                'treatment' => $record->treatment,
+                'notes' => $record->notes,
+            ];
+        } else {
+            $data = $record;
+        }
 
         $recordCode = trim((string) ($data['record_code'] ?? ''));
 
@@ -139,11 +167,11 @@ class BlockchainService
         // Validate compatibility with bytes32 encoding before generating off-chain hash.
         self::encodeRecordId($recordCode);
 
-        $patientId = (int) ($data['patient_id'] ?? 0);
-        $doctorId = (int) ($data['doctor_id'] ?? 0);
+        $patientCode = trim((string) ($data['patient_code'] ?? ''));
+        $doctorCode = trim((string) ($data['doctor_code'] ?? ''));
 
-        if ($patientId <= 0 || $doctorId <= 0) {
-            throw new InvalidArgumentException('patient_id dan doctor_id harus berupa integer positif.');
+        if ($patientCode === '' || $doctorCode === '') {
+            throw new InvalidArgumentException('patient_code dan doctor_code wajib diisi untuk canonical hash.');
         }
 
         $rawDate = $data['record_date'] ?? null;
@@ -164,9 +192,9 @@ class BlockchainService
         $payload = [
             'complaint' => $this->normalizeText((string) ($data['complaint'] ?? '')),
             'diagnosis' => $this->normalizeText((string) ($data['diagnosis'] ?? '')),
-            'doctor_id' => $doctorId,
+            'doctor_code' => $doctorCode,
             'notes' => $notes,
-            'patient_id' => $patientId,
+            'patient_code' => $patientCode,
             'record_code' => $recordCode,
             'record_date' => $recordDate,
             'treatment' => $this->normalizeText((string) ($data['treatment'] ?? '')),
@@ -296,12 +324,539 @@ class BlockchainService
     }
 
     /**
+     * Fetch and validate an on-chain transaction receipt from Sepolia JSON-RPC.
+     *
+     * @return array{
+     *     tx_hash: string,
+     *     block_number: int,
+     *     from: string,
+     *     to: string,
+     *     status: string,
+     *     logs: array<int, mixed>
+     * }
+     */
+    public function getTransactionReceipt(string $txHash, ?string $expectedSenderWallet = null): array
+    {
+        $normalizedTxHash = self::normalizeBytes32($txHash);
+        $contractAddress = $this->resolveContractAddress();
+        $normalizedExpectedSender = $expectedSenderWallet !== null
+            ? self::normalizeAddress($expectedSenderWallet)
+            : null;
+
+        $maxAttempts = $this->resolveReceiptMaxAttempts();
+        $retryDelayMs = $this->resolveReceiptRetryDelayMs();
+        $receipt = null;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            $receipt = $this->rpcRequest(
+                'eth_getTransactionReceipt',
+                [$normalizedTxHash],
+                'eth_getTransactionReceipt',
+            );
+
+            if ($receipt !== null) {
+                break;
+            }
+
+            if ($attempt < $maxAttempts && $retryDelayMs > 0) {
+                Sleep::usleep($retryDelayMs * 1000);
+            }
+        }
+
+        if ($receipt === null) {
+            throw BlockchainException::verificationFailed(
+                'eth_getTransactionReceipt',
+                "Receipt transaksi {$normalizedTxHash} tidak ditemukan atau belum terkonfirmasi di Sepolia.",
+            );
+        }
+
+        if (! is_array($receipt)) {
+            throw BlockchainException::invalidRpcResult(
+                'eth_getTransactionReceipt',
+                'Field result receipt transaksi harus berupa objek JSON.',
+            );
+        }
+
+        $status = strtolower(trim((string) ($receipt['status'] ?? '')));
+
+        if ($status !== '0x1') {
+            throw BlockchainException::verificationFailed(
+                'eth_getTransactionReceipt',
+                "Transaksi Sepolia {$normalizedTxHash} gagal atau reverted di smart contract.",
+            );
+        }
+
+        $to = is_string($receipt['to'] ?? null) ? strtolower(trim($receipt['to'])) : '';
+
+        if ($to !== $contractAddress) {
+            throw BlockchainException::verificationFailed(
+                'eth_getTransactionReceipt',
+                "Alamat tujuan transaksi ({$to}) tidak cocok dengan smart contract HealthcareRecord ({$contractAddress}).",
+            );
+        }
+
+        $rawFrom = $receipt['from'] ?? null;
+
+        if (! is_string($rawFrom) || preg_match('/\A0x[a-f0-9]{40}\z/i', trim($rawFrom)) !== 1) {
+            throw BlockchainException::invalidRpcResult(
+                'eth_getTransactionReceipt',
+                'Field from pada receipt transaksi tidak valid.',
+            );
+        }
+
+        $from = strtolower(trim($rawFrom));
+
+        if ($normalizedExpectedSender !== null && $from !== $normalizedExpectedSender) {
+            throw BlockchainException::verificationFailed(
+                'eth_getTransactionReceipt',
+                "Pengirim transaksi ({$from}) tidak cocok dengan wallet akun yang berwenang ({$normalizedExpectedSender}).",
+            );
+        }
+
+        if (isset($receipt['transactionHash']) && is_string($receipt['transactionHash'])) {
+            $receiptTxHash = strtolower(trim($receipt['transactionHash']));
+
+            if ($receiptTxHash !== $normalizedTxHash) {
+                throw BlockchainException::verificationFailed(
+                    'eth_getTransactionReceipt',
+                    "Transaction hash pada receipt ({$receiptTxHash}) tidak cocok dengan {$normalizedTxHash}.",
+                );
+            }
+        }
+
+        $rawBlockNumber = $receipt['blockNumber'] ?? null;
+
+        if (! is_string($rawBlockNumber) || preg_match('/\A0x[a-f0-9]+\z/i', trim($rawBlockNumber)) !== 1) {
+            throw BlockchainException::invalidRpcResult(
+                'eth_getTransactionReceipt',
+                'Field blockNumber pada receipt transaksi tidak berupa hex yang valid.',
+            );
+        }
+
+        $blockNumber = $this->decodeHexQuantityToInt(trim($rawBlockNumber), 'eth_getTransactionReceipt');
+        $logs = is_array($receipt['logs'] ?? null) ? array_values($receipt['logs']) : [];
+
+        return [
+            'tx_hash' => $normalizedTxHash,
+            'block_number' => $blockNumber,
+            'from' => $from,
+            'to' => $to,
+            'status' => $status,
+            'logs' => $logs,
+        ];
+    }
+
+    /**
+     * Verify an on-chain addDoctor() transaction receipt, DoctorAdded event log, and active doctor state.
+     *
+     * @return array{tx_hash: string, block_number: int, from: string, to: string}
+     */
+    public function verifyDoctorAddedTransaction(string $txHash, string $adminWallet, string $doctorWallet): array
+    {
+        $normalizedDoctor = self::normalizeAddress($doctorWallet);
+        $receipt = $this->getTransactionReceipt($txHash, $adminWallet);
+
+        $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => self::TOPIC_DOCTOR_ADDED,
+                1 => '0x'.$this->encodeAddressWord($normalizedDoctor),
+            ],
+            'verifyDoctorAddedTransaction',
+        );
+
+        if (! $this->isDoctorRegistered($normalizedDoctor)) {
+            throw BlockchainException::verificationFailed(
+                'verifyDoctorAddedTransaction',
+                "Status on-chain dokter ({$normalizedDoctor}) tidak aktif di smart contract Sepolia.",
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'from' => $receipt['from'],
+            'to' => $receipt['to'],
+        ];
+    }
+
+    /**
+     * Verify an on-chain removeDoctor() transaction receipt, DoctorRemoved event log, and inactive doctor state.
+     *
+     * @return array{tx_hash: string, block_number: int, from: string, to: string}
+     */
+    public function verifyDoctorRemovedTransaction(string $txHash, string $adminWallet, string $doctorWallet): array
+    {
+        $normalizedDoctor = self::normalizeAddress($doctorWallet);
+        $receipt = $this->getTransactionReceipt($txHash, $adminWallet);
+
+        $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => self::TOPIC_DOCTOR_REMOVED,
+                1 => '0x'.$this->encodeAddressWord($normalizedDoctor),
+            ],
+            'verifyDoctorRemovedTransaction',
+        );
+
+        if ($this->isDoctorRegistered($normalizedDoctor)) {
+            throw BlockchainException::verificationFailed(
+                'verifyDoctorRemovedTransaction',
+                "Dokter ({$normalizedDoctor}) masih tercatat aktif di smart contract Sepolia.",
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'from' => $receipt['from'],
+            'to' => $receipt['to'],
+        ];
+    }
+
+    /**
+     * Verify an on-chain addPatient() transaction receipt, PatientAdded event log, and active patient state.
+     *
+     * @return array{tx_hash: string, block_number: int, from: string, to: string}
+     */
+    public function verifyPatientAddedTransaction(string $txHash, string $adminWallet, string $patientWallet): array
+    {
+        $normalizedPatient = self::normalizeAddress($patientWallet);
+        $receipt = $this->getTransactionReceipt($txHash, $adminWallet);
+
+        $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => self::TOPIC_PATIENT_ADDED,
+                1 => '0x'.$this->encodeAddressWord($normalizedPatient),
+            ],
+            'verifyPatientAddedTransaction',
+        );
+
+        if (! $this->isPatientRegistered($normalizedPatient)) {
+            throw BlockchainException::verificationFailed(
+                'verifyPatientAddedTransaction',
+                "Status on-chain pasien ({$normalizedPatient}) tidak aktif di smart contract Sepolia.",
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'from' => $receipt['from'],
+            'to' => $receipt['to'],
+        ];
+    }
+
+    /**
+     * Verify an on-chain removePatient() transaction receipt, PatientRemoved event log, and inactive patient state.
+     *
+     * @return array{tx_hash: string, block_number: int, from: string, to: string}
+     */
+    public function verifyPatientRemovedTransaction(string $txHash, string $adminWallet, string $patientWallet): array
+    {
+        $normalizedPatient = self::normalizeAddress($patientWallet);
+        $receipt = $this->getTransactionReceipt($txHash, $adminWallet);
+
+        $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => self::TOPIC_PATIENT_REMOVED,
+                1 => '0x'.$this->encodeAddressWord($normalizedPatient),
+            ],
+            'verifyPatientRemovedTransaction',
+        );
+
+        if ($this->isPatientRegistered($normalizedPatient)) {
+            throw BlockchainException::verificationFailed(
+                'verifyPatientRemovedTransaction',
+                "Pasien ({$normalizedPatient}) masih tercatat aktif di smart contract Sepolia.",
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'from' => $receipt['from'],
+            'to' => $receipt['to'],
+        ];
+    }
+
+    /**
+     * Verify an on-chain grantAccess() transaction receipt, AccessGranted event log, and active access state.
+     *
+     * @return array{tx_hash: string, block_number: int, from: string, to: string}
+     */
+    public function verifyAccessGrantedTransaction(string $txHash, string $patientWallet, string $doctorWallet): array
+    {
+        $normalizedPatient = self::normalizeAddress($patientWallet);
+        $normalizedDoctor = self::normalizeAddress($doctorWallet);
+        $receipt = $this->getTransactionReceipt($txHash, $normalizedPatient);
+
+        $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => self::TOPIC_ACCESS_GRANTED,
+                1 => '0x'.$this->encodeAddressWord($normalizedPatient),
+                2 => '0x'.$this->encodeAddressWord($normalizedDoctor),
+            ],
+            'verifyAccessGrantedTransaction',
+        );
+
+        if (! $this->hasAccess($normalizedPatient, $normalizedDoctor)) {
+            throw BlockchainException::verificationFailed(
+                'verifyAccessGrantedTransaction',
+                'Izin akses dokter pada smart contract Sepolia saat ini tidak aktif.',
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'from' => $receipt['from'],
+            'to' => $receipt['to'],
+        ];
+    }
+
+    /**
+     * Verify an on-chain revokeAccess() transaction receipt, AccessRevoked event log, and inactive access state.
+     *
+     * @return array{tx_hash: string, block_number: int, from: string, to: string}
+     */
+    public function verifyAccessRevokedTransaction(string $txHash, string $patientWallet, string $doctorWallet): array
+    {
+        $normalizedPatient = self::normalizeAddress($patientWallet);
+        $normalizedDoctor = self::normalizeAddress($doctorWallet);
+        $receipt = $this->getTransactionReceipt($txHash, $normalizedPatient);
+
+        $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => self::TOPIC_ACCESS_REVOKED,
+                1 => '0x'.$this->encodeAddressWord($normalizedPatient),
+                2 => '0x'.$this->encodeAddressWord($normalizedDoctor),
+            ],
+            'verifyAccessRevokedTransaction',
+        );
+
+        if ($this->hasAccess($normalizedPatient, $normalizedDoctor)) {
+            throw BlockchainException::verificationFailed(
+                'verifyAccessRevokedTransaction',
+                'Izin akses dokter pada smart contract Sepolia saat ini masih aktif.',
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'from' => $receipt['from'],
+            'to' => $receipt['to'],
+        ];
+    }
+
+    /**
+     * Verify an on-chain addMedicalRecord() transaction receipt and MedicalRecordAdded event payload.
+     *
+     * @return array{tx_hash: string, block_number: int, onchain_hash: string}
+     */
+    public function verifyMedicalRecordAddedTransaction(
+        string $txHash,
+        string $doctorWallet,
+        string $recordCode,
+        string $patientWallet,
+        string $expectedRecordHash,
+    ): array {
+        return $this->verifyMedicalRecordEventTransaction(
+            self::TOPIC_MEDICAL_RECORD_ADDED,
+            'verifyMedicalRecordAddedTransaction',
+            $txHash,
+            $doctorWallet,
+            $recordCode,
+            $patientWallet,
+            $expectedRecordHash,
+        );
+    }
+
+    /**
+     * Verify an on-chain updateMedicalRecord() transaction receipt and MedicalRecordUpdated event payload.
+     *
+     * @return array{tx_hash: string, block_number: int, onchain_hash: string}
+     */
+    public function verifyMedicalRecordUpdatedTransaction(
+        string $txHash,
+        string $doctorWallet,
+        string $recordCode,
+        string $patientWallet,
+        string $expectedRecordHash,
+    ): array {
+        return $this->verifyMedicalRecordEventTransaction(
+            self::TOPIC_MEDICAL_RECORD_UPDATED,
+            'verifyMedicalRecordUpdatedTransaction',
+            $txHash,
+            $doctorWallet,
+            $recordCode,
+            $patientWallet,
+            $expectedRecordHash,
+        );
+    }
+
+    /**
+     * Verify MedicalRecordAdded or MedicalRecordUpdated receipt, indexed topics, and event hash data.
+     *
+     * @return array{tx_hash: string, block_number: int, onchain_hash: string}
+     */
+    private function verifyMedicalRecordEventTransaction(
+        string $topic0,
+        string $method,
+        string $txHash,
+        string $doctorWallet,
+        string $recordCode,
+        string $patientWallet,
+        string $expectedRecordHash,
+    ): array {
+        $normalizedDoctor = self::normalizeAddress($doctorWallet);
+        $normalizedPatient = self::normalizeAddress($patientWallet);
+        $encodedRecordId = self::encodeRecordId($recordCode);
+        $normalizedExpectedHash = self::normalizeBytes32($expectedRecordHash);
+
+        $receipt = $this->getTransactionReceipt($txHash, $normalizedDoctor);
+
+        $matchingLog = $this->findMatchingContractLog(
+            $receipt['logs'],
+            [
+                0 => $topic0,
+                1 => $encodedRecordId,
+                2 => '0x'.$this->encodeAddressWord($normalizedPatient),
+                3 => '0x'.$this->encodeAddressWord($normalizedDoctor),
+            ],
+            $method,
+        );
+
+        $rawData = $matchingLog['data'] ?? null;
+
+        if (! is_string($rawData)) {
+            throw BlockchainException::verificationFailed(
+                $method,
+                'Data event transaksi rekam medis tidak ditemukan pada log receipt.',
+            );
+        }
+
+        $hexBody = strtolower(preg_replace('/^0x/i', '', trim($rawData)) ?? '');
+
+        if (strlen($hexBody) < 64 || preg_match('/\A[a-f0-9]+\z/', $hexBody) !== 1) {
+            throw BlockchainException::verificationFailed(
+                $method,
+                'Format data event transaksi rekam medis tidak valid.',
+            );
+        }
+
+        $onchainHash = '0x'.substr($hexBody, 0, 64);
+
+        if (! hash_equals($normalizedExpectedHash, $onchainHash)) {
+            throw BlockchainException::verificationFailed(
+                $method,
+                'Hash rekam medis pada event blockchain tidak cocok dengan hash off-chain yang diharapkan.',
+            );
+        }
+
+        return [
+            'tx_hash' => $receipt['tx_hash'],
+            'block_number' => $receipt['block_number'],
+            'onchain_hash' => $onchainHash,
+        ];
+    }
+
+    /**
+     * Locate a non-removed contract event log matching all expected topics.
+     *
+     * @param  array<int, mixed>  $logs
+     * @param  array<int, string>  $expectedTopics
+     * @return array<string, mixed>
+     */
+    private function findMatchingContractLog(array $logs, array $expectedTopics, string $method): array
+    {
+        $contractAddress = $this->resolveContractAddress();
+
+        foreach ($logs as $log) {
+            if (! is_array($log)) {
+                continue;
+            }
+
+            if (($log['removed'] ?? false) === true) {
+                continue;
+            }
+
+            $logAddress = is_string($log['address'] ?? null) ? strtolower(trim($log['address'])) : '';
+
+            if ($logAddress !== $contractAddress) {
+                continue;
+            }
+
+            $topics = $log['topics'] ?? null;
+
+            if (! is_array($topics)) {
+                continue;
+            }
+
+            $allMatch = true;
+
+            foreach ($expectedTopics as $index => $expectedTopic) {
+                if (
+                    ! isset($topics[$index])
+                    || ! is_string($topics[$index])
+                    || strtolower(trim($topics[$index])) !== $expectedTopic
+                ) {
+                    $allMatch = false;
+
+                    break;
+                }
+            }
+
+            if ($allMatch) {
+                return $log;
+            }
+        }
+
+        throw BlockchainException::verificationFailed(
+            $method,
+            'Event smart contract yang diharapkan tidak ditemukan pada receipt transaksi Sepolia.',
+        );
+    }
+
+    /**
      * Execute a read-only eth_call against the configured Sepolia JSON-RPC endpoint.
      */
     private function ethCall(string $method, string $data): string
     {
-        $rpcUrl = $this->resolveRpcUrl();
         $contractAddress = $this->resolveContractAddress();
+
+        $result = $this->rpcRequest(
+            'eth_call',
+            [
+                [
+                    'to' => $contractAddress,
+                    'data' => $data,
+                ],
+                'latest',
+            ],
+            $method,
+        );
+
+        if (! is_string($result) || preg_match('/\A0x[a-f0-9]*\z/i', $result) !== 1) {
+            throw BlockchainException::invalidRpcResult($method, 'Field result tidak berupa string hex yang valid.');
+        }
+
+        return strtolower($result);
+    }
+
+    /**
+     * Execute a JSON-RPC 2.0 request and normalize all HTTP, transport, and non-JSON errors to BlockchainException.
+     *
+     * @param  array<int, mixed>  $params
+     */
+    private function rpcRequest(string $rpcMethod, array $params, string $logicalMethod): mixed
+    {
+        $rpcUrl = $this->resolveRpcUrl();
 
         try {
             $response = Http::acceptJson()
@@ -319,25 +874,35 @@ class BlockchainService
                 ->post($rpcUrl, [
                     'jsonrpc' => '2.0',
                     'id' => 1,
-                    'method' => 'eth_call',
-                    'params' => [
-                        [
-                            'to' => $contractAddress,
-                            'data' => $data,
-                        ],
-                        'latest',
-                    ],
+                    'method' => $rpcMethod,
+                    'params' => $params,
                 ]);
-        } catch (ConnectionException $exception) {
-            throw BlockchainException::rpcTransportFailed($method, $exception->getMessage(), $exception);
+        } catch (ConnectionException|RequestException $exception) {
+            throw BlockchainException::rpcTransportFailed($logicalMethod, $exception->getMessage(), $exception);
         }
 
-        $payload = $response->json();
+        try {
+            $payload = $response->json();
+        } catch (Throwable $exception) {
+            throw BlockchainException::rpcTransportFailed(
+                $logicalMethod,
+                "Node RPC mengembalikan HTTP {$response->status()} dengan body non-JSON.",
+                $exception,
+            );
+        }
 
         if (! is_array($payload)) {
-            $response->throw();
+            if ($response->failed()) {
+                throw BlockchainException::rpcTransportFailed(
+                    $logicalMethod,
+                    "Node RPC mengembalikan HTTP {$response->status()} dengan respons non-JSON.",
+                );
+            }
 
-            throw BlockchainException::invalidRpcResult($method, 'Respons JSON-RPC bukan objek JSON yang valid.');
+            throw BlockchainException::invalidRpcResult(
+                $logicalMethod,
+                'Respons JSON-RPC bukan objek JSON yang valid.',
+            );
         }
 
         if (isset($payload['error']) && is_array($payload['error'])) {
@@ -346,7 +911,7 @@ class BlockchainService
                 : null;
 
             throw BlockchainException::rpcReturnedError(
-                $method,
+                $logicalMethod,
                 $payload['error']['code'] ?? null,
                 (string) ($payload['error']['message'] ?? 'Unknown RPC error'),
                 $this->decodeRevertReason($errorData),
@@ -354,16 +919,21 @@ class BlockchainService
         }
 
         if ($response->failed()) {
-            $response->throw();
+            $errorMessage = is_string($payload['message'] ?? null) && trim($payload['message']) !== ''
+                ? trim($payload['message'])
+                : "HTTP {$response->status()} dari node RPC.";
+
+            throw BlockchainException::rpcTransportFailed($logicalMethod, $errorMessage);
         }
 
-        $result = $payload['result'] ?? null;
-
-        if (! is_string($result) || preg_match('/\A0x[a-f0-9]*\z/i', $result) !== 1) {
-            throw BlockchainException::invalidRpcResult($method, 'Field result tidak berupa string hex yang valid.');
+        if (! array_key_exists('result', $payload)) {
+            throw BlockchainException::invalidRpcResult(
+                $logicalMethod,
+                'Respons JSON-RPC tidak memiliki field result maupun error.',
+            );
         }
 
-        return strtolower($result);
+        return $payload['result'];
     }
 
     /**
@@ -412,6 +982,22 @@ class BlockchainService
     private function resolveRpcTimeout(): int
     {
         return max(1, (int) ($this->rpcTimeout ?? config('blockchain.rpc_timeout', 10)));
+    }
+
+    /**
+     * Resolve the maximum number of receipt fetch attempts when eth_getTransactionReceipt returns null.
+     */
+    private function resolveReceiptMaxAttempts(): int
+    {
+        return max(1, (int) ($this->receiptMaxAttempts ?? config('blockchain.receipt_max_attempts', 3)));
+    }
+
+    /**
+     * Resolve the delay in milliseconds between receipt polling attempts.
+     */
+    private function resolveReceiptRetryDelayMs(): int
+    {
+        return max(0, (int) ($this->receiptRetryDelayMs ?? config('blockchain.receipt_retry_delay_ms', 500)));
     }
 
     /**
@@ -495,14 +1081,22 @@ class BlockchainService
      */
     private function decodeUint256ToInt(string $wordHex, string $method): int
     {
-        $significant = ltrim($wordHex, '0');
+        return $this->decodeHexQuantityToInt('0x'.$wordHex, $method);
+    }
+
+    /**
+     * Decode a 0x-prefixed hex quantity into a PHP integer within 64-bit signed integer bounds.
+     */
+    private function decodeHexQuantityToInt(string $hexValue, string $method): int
+    {
+        $significant = ltrim(strtolower(substr($hexValue, 2)), '0');
 
         if ($significant === '') {
             return 0;
         }
 
         if (strlen($significant) > 16 || (strlen($significant) === 16 && strcmp($significant, '7fffffffffffffff') > 0)) {
-            throw BlockchainException::invalidRpcResult($method, 'Nilai uint256 melebihi batas integer 64-bit PHP.');
+            throw BlockchainException::invalidRpcResult($method, 'Nilai numerik hex melebihi batas integer 64-bit PHP.');
         }
 
         return (int) hexdec($significant);

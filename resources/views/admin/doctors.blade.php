@@ -93,7 +93,8 @@
                                     data-specialization="{{ $doctor->specialization }}"
                                     data-str-number="{{ $doctor->str_number }}" data-username="{{ $doctor->user->username }}"
                                     data-email="{{ $doctor->user->email }}"
-                                    data-wallet-address="{{ $doctor->user->wallet_address }}">
+                                    data-wallet-address="{{ $doctor->user->wallet_address }}"
+                                    data-is-onchain="{{ $doctor->is_registered_onchain ? '1' : '0' }}">
                                     <i class="bi bi-pencil-square"></i>
                                 </button>
 
@@ -207,6 +208,8 @@
                     @method('PUT')
                     <input type="hidden" name="_form_mode" value="edit_doctor">
                     <input type="hidden" name="_edit_action" id="editDocActionInput" value="{{ old('_edit_action', '') }}">
+                    <input type="hidden" name="_edit_is_onchain" id="editDocIsOnchain"
+                        value="{{ old('_form_mode') === 'edit_doctor' ? old('_edit_is_onchain', '0') : '0' }}">
                     <div class="modal-body small">
                         <div class="row g-3">
                             <div class="col-md-4">
@@ -257,8 +260,13 @@
                                 <input type="text" name="wallet_address" id="editDocWallet"
                                     value="{{ old('_form_mode') === 'edit_doctor' ? old('wallet_address') : '' }}"
                                     class="form-control form-control-sm font-monospace" required>
-                                <div class="form-text">Jika wallet diubah, status registrasi on-chain akan direset agar
-                                    dapat didaftarkan ulang.</div>
+                                <div id="editDocWalletOnchainWarning"
+                                    class="alert alert-warning py-2 px-3 small mt-2 mb-1 {{ old('_form_mode') === 'edit_doctor' && old('_edit_is_onchain') === '1' ? '' : 'd-none' }}"
+                                    role="alert">
+                                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                    <strong>Akun Aktif On-Chain:</strong> Nonaktifkan status on-chain dokter terlebih dahulu sebelum mengganti alamat wallet agar tidak meninggalkan state aktif di smart contract Sepolia.
+                                </div>
+                                <div class="form-text">Jika wallet diubah setelah status on-chain dinonaktifkan, riwayat tx registrasi lama akan direset untuk pendaftaran ulang.</div>
                             </div>
                         </div>
                     </div>

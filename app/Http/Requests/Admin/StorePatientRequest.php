@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Models\Patient;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -41,6 +42,8 @@ class StorePatientRequest extends FormRequest
      */
     public function rules(): array
     {
+        $adminWallet = strtolower(trim((string) config('blockchain.admin_wallet_address', '')));
+
         return [
             'patient_code' => ['nullable', 'string', 'max:20', 'regex:/\A[\x21-\x7E]+\z/', Rule::unique('patients', 'patient_code')],
             'full_name' => ['required', 'string', 'max:100'],
@@ -50,7 +53,17 @@ class StorePatientRequest extends FormRequest
             'username' => ['required', 'string', 'min:3', 'max:50', 'regex:/\A[a-zA-Z0-9_.-]+\z/', Rule::unique('users', 'username')],
             'email' => ['nullable', 'email', 'max:100', Rule::unique('users', 'email')],
             'password' => ['required', 'string', 'min:8'],
-            'wallet_address' => ['required', 'string', 'regex:/\A0x[a-f0-9]{40}\z/', Rule::unique('users', 'wallet_address')],
+            'wallet_address' => [
+                'required',
+                'string',
+                'regex:/\A0x[a-f0-9]{40}\z/',
+                Rule::unique('users', 'wallet_address'),
+                function (string $attribute, mixed $value, Closure $fail) use ($adminWallet): void {
+                    if ($adminWallet !== '' && is_string($value) && strtolower($value) === $adminWallet) {
+                        $fail('Alamat wallet Admin smart contract tidak dapat didaftarkan sebagai pasien.');
+                    }
+                },
+            ],
         ];
     }
 

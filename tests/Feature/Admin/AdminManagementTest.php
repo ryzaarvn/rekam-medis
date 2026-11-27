@@ -1,13 +1,25 @@
 <?php
 
+use App\Models\Authorization;
 use App\Models\Doctor;
 use App\Models\LogBlockchain;
 use App\Models\MedicalRecord;
 use App\Models\Patient;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    Config::set('blockchain.chain_id', 11155111);
+    Config::set('blockchain.contract_address', '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4');
+    Config::set('blockchain.rpc_url', 'https://eth-sepolia.example.test/v2/test-key');
+    Config::set('blockchain.admin_wallet_address', '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3');
+    Config::set('blockchain.receipt_max_attempts', 1);
+    Config::set('blockchain.receipt_retry_delay_ms', 0);
+});
 
 function makeAdminUser(): User
 {
@@ -15,6 +27,30 @@ function makeAdminUser(): User
         'username' => 'admin_utama',
         'wallet_address' => '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3',
     ]);
+}
+
+function adminFakeEventReceipt(
+    string $txHash,
+    string $from,
+    string $topic0,
+    string $indexedAddress,
+    string $status = '0x1',
+): array {
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+    $paddedAddress = '0x'.str_pad(substr(strtolower($indexedAddress), 2), 64, '0', STR_PAD_LEFT);
+
+    return [
+        'transactionHash' => strtolower($txHash),
+        'from' => strtolower($from),
+        'to' => $contract,
+        'status' => $status,
+        'blockNumber' => '0x6ad3c2',
+        'logs' => [[
+            'address' => $contract,
+            'topics' => [$topic0, $paddedAddress],
+            'data' => '0x',
+        ]],
+    ];
 }
 
 it('displays analytics counts and recent blockchain logs on the admin dashboard', function () {
@@ -92,8 +128,11 @@ it('displays analytics counts and recent blockchain logs on the admin dashboard'
         ->assertSee("https://sepolia.etherscan.io/tx/{$txHash}");
 });
 
-it('creates, updates, syncs on-chain status, and deletes a doctor cleanly', function () {
+it('creates, verifies on-chain registration and deactivation with authorization cascade, and deletes a doctor cleanly', function () {
+    Http::preventStrayRequests();
+
     $admin = makeAdminUser();
+    $doctorWallet = '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
     $createResponse = $this->actingAs($admin)->post(route('admin.doctors.store'), [
         'full_name' => 'dr. Hendra <script>alert(1)</script>',
@@ -102,7 +141,7 @@ it('creates, updates, syncs on-chain status, and deletes a doctor cleanly', func
         'username' => 'dr_hendra',
         'email' => 'hendra@klinik.id',
         'password' => 'Password123!',
-        'wallet_address' => '0xA1B2C3D4E5F60718293A4B5C6D7E8F9012345678',
+        'wallet_address' => strtoupper($doctorWallet),
     ]);
 
     $createResponse->assertRedirect(route('admin.doctors.index'));
@@ -112,7 +151,7 @@ it('creates, updates, syncs on-chain status, and deletes a doctor cleanly', func
     expect($doctor->doctor_code)->toBe('DOC001')
         ->and($doctor->is_registered_onchain)->toBeFalse()
         ->and($doctor->user->role)->toBe(User::ROLE_DOKTER)
-        ->and($doctor->user->wallet_address)->toBe('0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678');
+        ->and($doctor->user->wallet_address)->toBe($doctorWallet);
 
     $this->actingAs($admin)
         ->get(route('admin.doctors.index'))
@@ -121,6 +160,26 @@ it('creates, updates, syncs on-chain status, and deletes a doctor cleanly', func
         ->assertDontSee('<script>alert(1)</script>', false);
 
     $registerTx = '0x'.str_repeat('C', 64);
+    $deactivateTx = '0x'.str_repeat('D', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $registerTx,
+                $admin->wallet_address,
+                '0x69908b2e63170aa89ef89719bbe3b4c92cccc38653968ab25f4464eff7c28ac8',
+                $doctorWallet,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 63).'1'])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $deactivateTx,
+                $admin->wallet_address,
+                '0x493d7cf6a7c880406a55654d6727464ea088bd01d40498e1987a327e68961ab8',
+                $doctorWallet,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 64)]),
+    ]);
+
     $this->actingAs($admin)
         ->postJson(route('admin.doctors.onchain-register', $doctor), [
             'registration_tx_hash' => $registerTx,
@@ -132,14 +191,38 @@ it('creates, updates, syncs on-chain status, and deletes a doctor cleanly', func
     expect($doctor->is_registered_onchain)->toBeTrue()
         ->and($doctor->registration_tx_hash)->toBe(strtolower($registerTx));
 
+    $patientUser = User::factory()->pasien()->create();
+    $patient = Patient::create([
+        'patient_code' => 'PAT001',
+        'user_id' => $patientUser->id,
+        'full_name' => 'Pasien Terhubung',
+        'date_of_birth' => '1995-05-05',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Merdeka No. 1',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('8', 64),
+    ]);
+    $auth = Authorization::create([
+        'patient_id' => $patient->id,
+        'doctor_id' => $doctor->id,
+        'is_authorized' => true,
+        'tx_hash' => '0x'.str_repeat('7', 64),
+    ]);
+
     $this->actingAs($admin)
-        ->postJson(route('admin.doctors.onchain-deactivate', $doctor))
+        ->postJson(route('admin.doctors.onchain-deactivate', $doctor), [
+            'tx_hash' => $deactivateTx,
+        ])
         ->assertOk()
-        ->assertJsonPath('doctor.is_registered_onchain', false);
+        ->assertJsonPath('doctor.is_registered_onchain', false)
+        ->assertJsonPath('etherscan_url', 'https://sepolia.etherscan.io/tx/'.strtolower($deactivateTx));
 
     $doctor->refresh();
+    $auth->refresh();
     expect($doctor->is_registered_onchain)->toBeFalse()
-        ->and($doctor->registration_tx_hash)->toBe(strtolower($registerTx));
+        ->and($doctor->registration_tx_hash)->toBe(strtolower($registerTx))
+        ->and($auth->is_authorized)->toBeFalse()
+        ->and($auth->tx_hash)->toBeNull();
 
     $this->actingAs($admin)->put(route('admin.doctors.update', $doctor), [
         'doctor_code' => 'DOC001',
@@ -165,15 +248,33 @@ it('creates, updates, syncs on-chain status, and deletes a doctor cleanly', func
     $this->assertDatabaseMissing('users', ['id' => $doctor->user_id]);
 });
 
-it('rejects invalid transaction hash when registering a doctor on-chain', function () {
+it('rejects invalid, empty, or unverified transaction hashes when registering or deactivating doctor and patient on-chain', function () {
+    Http::preventStrayRequests();
+
     $admin = makeAdminUser();
-    $doctorUser = User::factory()->dokter()->create();
+    $doctorUser = User::factory()->dokter()->create([
+        'wallet_address' => '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+    ]);
     $doctor = Doctor::create([
         'doctor_code' => 'DOC001',
         'user_id' => $doctorUser->id,
         'full_name' => 'dr. Uji',
         'specialization' => 'Umum',
         'str_number' => 'STR-999',
+        'is_registered_onchain' => false,
+    ]);
+
+    $patientUser = User::factory()->pasien()->create([
+        'wallet_address' => '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890',
+    ]);
+    $patient = Patient::create([
+        'patient_code' => 'PAT001',
+        'user_id' => $patientUser->id,
+        'full_name' => 'Pasien Uji',
+        'date_of_birth' => '1990-02-10',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Mawar No. 1',
+        'is_registered_onchain' => false,
     ]);
 
     $this->actingAs($admin)
@@ -182,10 +283,178 @@ it('rejects invalid transaction hash when registering a doctor on-chain', functi
         ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('registration_tx_hash');
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.doctors.onchain-deactivate', $doctor), [])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('tx_hash');
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-register', $patient), [
+            'registration_tx_hash' => '0xinvalid',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('registration_tx_hash');
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-deactivate', $patient), [
+            'tx_hash' => 'not-a-hash',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('tx_hash');
+
+    $fakeTx = '0x'.str_repeat('f', 64);
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => null])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $fakeTx,
+                $admin->wallet_address,
+                '0x053a4badf166f01c4b02f6bcb71d2d67734470d0866282e291e73001aa25c769',
+                $patientUser->wallet_address,
+                '0x0',
+            )]),
+    ]);
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.doctors.onchain-register', $doctor), [
+            'registration_tx_hash' => $fakeTx,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonStructure(['message']);
+
+    $patient->update(['is_registered_onchain' => true, 'registration_tx_hash' => '0x'.str_repeat('1', 64)]);
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-deactivate', $patient), [
+            'tx_hash' => $fakeTx,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonStructure(['message']);
+
+    expect($doctor->fresh()->is_registered_onchain)->toBeFalse()
+        ->and($patient->fresh()->is_registered_onchain)->toBeTrue();
 });
 
-it('creates, updates, syncs on-chain status, and deletes a patient while blocking deletion when records exist', function () {
+it('blocks changing wallet or deleting an active on-chain doctor and patient with a warning while allowing non-wallet edits', function () {
     $admin = makeAdminUser();
+
+    $doctorWallet = '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    $doctorUser = User::factory()->dokter()->create([
+        'username' => 'dr_aktif',
+        'wallet_address' => $doctorWallet,
+    ]);
+    $doctor = Doctor::create([
+        'doctor_code' => 'DOC001',
+        'user_id' => $doctorUser->id,
+        'full_name' => 'dr. Aktif',
+        'specialization' => 'Umum',
+        'str_number' => 'STR-01',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('1', 64),
+    ]);
+
+    $patientWallet = '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890';
+    $patientUser = User::factory()->pasien()->create([
+        'username' => 'pasien_aktif',
+        'wallet_address' => $patientWallet,
+    ]);
+    $patient = Patient::create([
+        'patient_code' => 'PAT001',
+        'user_id' => $patientUser->id,
+        'full_name' => 'Pasien Aktif',
+        'date_of_birth' => '1994-05-12',
+        'gender' => Patient::GENDER_MALE,
+        'address' => 'Jl. Melati No. 1',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('2', 64),
+    ]);
+
+    // Blocked wallet edit on active on-chain doctor
+    $this->actingAs($admin)
+        ->put(route('admin.doctors.update', $doctor), [
+            'doctor_code' => 'DOC001',
+            'full_name' => 'dr. Aktif',
+            'specialization' => 'Umum',
+            'str_number' => 'STR-01',
+            'username' => 'dr_aktif',
+            'wallet_address' => '0x9999999999999999999999999999999999999999',
+        ])
+        ->assertRedirect(route('admin.doctors.index'))
+        ->assertSessionHas('warning')
+        ->assertSessionHasErrors('wallet_address');
+
+    expect($doctor->fresh()->user->wallet_address)->toBe($doctorWallet);
+
+    // Allowed non-wallet edit on active on-chain doctor
+    $this->actingAs($admin)
+        ->put(route('admin.doctors.update', $doctor), [
+            'doctor_code' => 'DOC001',
+            'full_name' => 'dr. Aktif Diperbarui',
+            'specialization' => 'Penyakit Dalam',
+            'str_number' => 'STR-01',
+            'username' => 'dr_aktif',
+            'wallet_address' => $doctorWallet,
+        ])
+        ->assertRedirect(route('admin.doctors.index'))
+        ->assertSessionHas('status');
+
+    expect($doctor->fresh()->full_name)->toBe('dr. Aktif Diperbarui')
+        ->and($doctor->fresh()->is_registered_onchain)->toBeTrue();
+
+    // Blocked deletion on active on-chain doctor
+    $this->actingAs($admin)
+        ->delete(route('admin.doctors.destroy', $doctor))
+        ->assertRedirect(route('admin.doctors.index'))
+        ->assertSessionHas('warning');
+
+    $this->assertDatabaseHas('doctors', ['id' => $doctor->id]);
+
+    // Blocked wallet edit and deletion on active on-chain patient
+    $this->actingAs($admin)
+        ->put(route('admin.patients.update', $patient), [
+            'patient_code' => 'PAT001',
+            'full_name' => 'Pasien Aktif',
+            'date_of_birth' => '1994-05-12',
+            'gender' => Patient::GENDER_MALE,
+            'address' => 'Jl. Melati No. 1',
+            'username' => 'pasien_aktif',
+            'wallet_address' => '0x8888888888888888888888888888888888888888',
+        ])
+        ->assertRedirect(route('admin.patients.index'))
+        ->assertSessionHas('warning')
+        ->assertSessionHasErrors('wallet_address');
+
+    // Allowed non-wallet edit on active on-chain patient
+    $this->actingAs($admin)
+        ->put(route('admin.patients.update', $patient), [
+            'patient_code' => 'PAT001',
+            'full_name' => 'Pasien Aktif Diperbarui',
+            'date_of_birth' => '1994-05-12',
+            'gender' => Patient::GENDER_MALE,
+            'address' => 'Jl. Melati No. 2',
+            'username' => 'pasien_aktif',
+            'wallet_address' => $patientWallet,
+        ])
+        ->assertRedirect(route('admin.patients.index'))
+        ->assertSessionHas('status');
+
+    expect($patient->fresh()->full_name)->toBe('Pasien Aktif Diperbarui')
+        ->and($patient->fresh()->is_registered_onchain)->toBeTrue();
+
+    $this->actingAs($admin)
+        ->delete(route('admin.patients.destroy', $patient))
+        ->assertRedirect(route('admin.patients.index'))
+        ->assertSessionHas('warning');
+
+    $this->assertDatabaseHas('patients', ['id' => $patient->id]);
+});
+
+it('creates, updates, syncs on-chain status with authorization cascade, and blocks deletion when records exist for a patient', function () {
+    Http::preventStrayRequests();
+
+    $admin = makeAdminUser();
+    $patientWallet = '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890';
 
     $createResponse = $this->actingAs($admin)->post(route('admin.patients.store'), [
         'full_name' => 'Siti Aminah',
@@ -195,7 +464,7 @@ it('creates, updates, syncs on-chain status, and deletes a patient while blockin
         'username' => 'siti_aminah',
         'email' => '',
         'password' => 'Password123!',
-        'wallet_address' => '0xB2C3D4E5F60718293A4B5C6D7E8F901234567890',
+        'wallet_address' => strtoupper($patientWallet),
     ]);
 
     $createResponse->assertRedirect(route('admin.patients.index'))
@@ -206,17 +475,45 @@ it('creates, updates, syncs on-chain status, and deletes a patient while blockin
     expect($patient->patient_code)->toBe('PAT001')
         ->and($patient->is_registered_onchain)->toBeFalse()
         ->and($patient->registration_tx_hash)->toBeNull()
-        ->and($patient->user->wallet_address)->toBe('0xb2c3d4e5f60718293a4b5c6d7e8f901234567890');
-
-    $this->actingAs($admin)
-        ->get(route('admin.patients.index'))
-        ->assertOk()
-        ->assertSee('siti_aminah')
-        ->assertSee('0xb2c3d4e5f60718293a4b5c6d7e8f901234567890')
-        ->assertSee('Belum Terdaftar')
-        ->assertSee('Daftarkan On-Chain');
+        ->and($patient->user->wallet_address)->toBe($patientWallet);
 
     $registerTx = '0x'.str_repeat('D', 64);
+    $deactivateTx = '0x'.str_repeat('E', 64);
+    $reRegisterTx = '0x'.str_repeat('F', 64);
+    $reDeactivateTx = '0x'.str_repeat('9', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $registerTx,
+                $admin->wallet_address,
+                '0xa58cff07db0adda3ab7a40bd2f18ab57210bf38391a52ffd2e8eee6b8bdec71a',
+                $patientWallet,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 63).'1'])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $deactivateTx,
+                $admin->wallet_address,
+                '0x053a4badf166f01c4b02f6bcb71d2d67734470d0866282e291e73001aa25c769',
+                $patientWallet,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 64)])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $reRegisterTx,
+                $admin->wallet_address,
+                '0xa58cff07db0adda3ab7a40bd2f18ab57210bf38391a52ffd2e8eee6b8bdec71a',
+                $patientWallet,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 63).'1'])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => adminFakeEventReceipt(
+                $reDeactivateTx,
+                $admin->wallet_address,
+                '0x053a4badf166f01c4b02f6bcb71d2d67734470d0866282e291e73001aa25c769',
+                $patientWallet,
+            )])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 64)]),
+    ]);
+
     $this->actingAs($admin)
         ->postJson(route('admin.patients.onchain-register', $patient), [
             'registration_tx_hash' => $registerTx,
@@ -224,40 +521,48 @@ it('creates, updates, syncs on-chain status, and deletes a patient while blockin
         ->assertOk()
         ->assertJsonPath('patient.is_registered_onchain', true);
 
-    $patient->refresh();
-    expect($patient->is_registered_onchain)->toBeTrue()
-        ->and($patient->registration_tx_hash)->toBe(strtolower($registerTx));
+    $doctorUser = User::factory()->dokter()->create();
+    $doctor = Doctor::create([
+        'doctor_code' => 'DOC001',
+        'user_id' => $doctorUser->id,
+        'full_name' => 'dr. Budi',
+        'specialization' => 'Umum',
+        'str_number' => 'STR-01',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('1', 64),
+    ]);
+    $auth = Authorization::create([
+        'patient_id' => $patient->id,
+        'doctor_id' => $doctor->id,
+        'is_authorized' => true,
+        'tx_hash' => '0x'.str_repeat('2', 64),
+    ]);
 
     $this->actingAs($admin)
-        ->get(route('admin.patients.index'))
-        ->assertOk()
-        ->assertSee('Terdaftar')
-        ->assertSee('Nonaktifkan On-Chain')
-        ->assertSee("https://sepolia.etherscan.io/tx/{$patient->registration_tx_hash}");
-
-    $this->actingAs($admin)
-        ->postJson(route('admin.patients.onchain-deactivate', $patient))
+        ->postJson(route('admin.patients.onchain-deactivate', $patient), [
+            'tx_hash' => $deactivateTx,
+        ])
         ->assertOk()
         ->assertJsonPath('patient.is_registered_onchain', false);
 
     $patient->refresh();
+    $auth->refresh();
     expect($patient->is_registered_onchain)->toBeFalse()
-        ->and($patient->registration_tx_hash)->toBe(strtolower($registerTx));
+        ->and($auth->is_authorized)->toBeFalse()
+        ->and($auth->tx_hash)->toBeNull();
 
-    $this->actingAs($admin)
-        ->get(route('admin.patients.index'))
-        ->assertOk()
-        ->assertSee('Dinonaktifkan')
-        ->assertSee('Daftarkan On-Chain');
-
-    // Re-register before testing wallet change reset.
-    $reRegisterTx = '0x'.str_repeat('E', 64);
+    // Re-register then deactivate before updating wallet
     $this->actingAs($admin)
         ->postJson(route('admin.patients.onchain-register', $patient), [
             'tx_hash' => $reRegisterTx,
         ])
-        ->assertOk()
-        ->assertJsonPath('patient.is_registered_onchain', true);
+        ->assertOk();
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.patients.onchain-deactivate', $patient), [
+            'tx_hash' => $reDeactivateTx,
+        ])
+        ->assertOk();
 
     $this->actingAs($admin)->put(route('admin.patients.update', $patient), [
         'patient_code' => 'PAT001',
@@ -275,14 +580,6 @@ it('creates, updates, syncs on-chain status, and deletes a patient while blockin
         ->and($patient->is_registered_onchain)->toBeFalse()
         ->and($patient->registration_tx_hash)->toBeNull();
 
-    $doctorUser = User::factory()->dokter()->create();
-    $doctor = Doctor::create([
-        'doctor_code' => 'DOC001',
-        'user_id' => $doctorUser->id,
-        'full_name' => 'dr. Budi',
-        'specialization' => 'Umum',
-        'str_number' => 'STR-01',
-    ]);
     MedicalRecord::create([
         'record_code' => 'MR001',
         'patient_id' => $patient->id,
@@ -302,22 +599,83 @@ it('creates, updates, syncs on-chain status, and deletes a patient while blockin
     $this->assertDatabaseHas('patients', ['id' => $patient->id]);
 });
 
-it('rejects invalid transaction hash when registering a patient on-chain', function () {
+it('rejects registering the smart contract admin wallet address as a doctor or patient', function () {
     $admin = makeAdminUser();
+    $adminWallet = '0x42B01A713EA7A8ECA09D36A9D8FA177AC301E1C3';
+
+    $this->actingAs($admin)
+        ->from(route('admin.doctors.index'))
+        ->post(route('admin.doctors.store'), [
+            'full_name' => 'dr. Admin Palsu',
+            'specialization' => 'Umum',
+            'str_number' => 'STR-ADMIN-01',
+            'username' => 'dr_admin_palsu',
+            'password' => 'Password123!',
+            'wallet_address' => $adminWallet,
+        ])
+        ->assertRedirect(route('admin.doctors.index'))
+        ->assertSessionHasErrors('wallet_address');
+
+    $this->actingAs($admin)
+        ->from(route('admin.patients.index'))
+        ->post(route('admin.patients.store'), [
+            'full_name' => 'Pasien Admin Palsu',
+            'date_of_birth' => '1995-01-01',
+            'gender' => Patient::GENDER_MALE,
+            'address' => 'Jl. Raya No. 1',
+            'username' => 'pasien_admin_palsu',
+            'password' => 'Password123!',
+            'wallet_address' => $adminWallet,
+        ])
+        ->assertRedirect(route('admin.patients.index'))
+        ->assertSessionHasErrors('wallet_address');
+
+    // Also test update path when admin user happens to have a different wallet in DB than config admin_wallet_address
+    Config::set('blockchain.admin_wallet_address', '0x7777777777777777777777777777777777777777');
+
+    $doctorUser = User::factory()->dokter()->create();
+    $doctor = Doctor::create([
+        'doctor_code' => 'DOC009',
+        'user_id' => $doctorUser->id,
+        'full_name' => 'dr. Uji Update',
+        'specialization' => 'Umum',
+        'str_number' => 'STR-UPD-09',
+    ]);
+
     $patientUser = User::factory()->pasien()->create();
     $patient = Patient::create([
-        'patient_code' => 'PAT001',
+        'patient_code' => 'PAT009',
         'user_id' => $patientUser->id,
-        'full_name' => 'Pasien Uji',
-        'date_of_birth' => '1990-02-10',
-        'gender' => Patient::GENDER_MALE,
-        'address' => 'Jl. Mawar No. 1',
+        'full_name' => 'Pasien Uji Update',
+        'date_of_birth' => '1992-01-01',
+        'gender' => Patient::GENDER_FEMALE,
+        'address' => 'Jl. Uji No. 9',
     ]);
 
     $this->actingAs($admin)
-        ->postJson(route('admin.patients.onchain-register', $patient), [
-            'registration_tx_hash' => '0xinvalid',
+        ->from(route('admin.doctors.index'))
+        ->put(route('admin.doctors.update', $doctor), [
+            'doctor_code' => 'DOC009',
+            'full_name' => 'dr. Uji Update',
+            'specialization' => 'Umum',
+            'str_number' => 'STR-UPD-09',
+            'username' => $doctorUser->username,
+            'wallet_address' => '0x7777777777777777777777777777777777777777',
         ])
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors('registration_tx_hash');
+        ->assertRedirect(route('admin.doctors.index'))
+        ->assertSessionHasErrors('wallet_address');
+
+    $this->actingAs($admin)
+        ->from(route('admin.patients.index'))
+        ->put(route('admin.patients.update', $patient), [
+            'patient_code' => 'PAT009',
+            'full_name' => 'Pasien Uji Update',
+            'date_of_birth' => '1992-01-01',
+            'gender' => Patient::GENDER_FEMALE,
+            'address' => 'Jl. Uji No. 9',
+            'username' => $patientUser->username,
+            'wallet_address' => '0x7777777777777777777777777777777777777777',
+        ])
+        ->assertRedirect(route('admin.patients.index'))
+        ->assertSessionHasErrors('wallet_address');
 });

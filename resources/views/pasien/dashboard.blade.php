@@ -33,7 +33,7 @@
                                 class="hash-code">-</span></div>
                         <div class="mt-1"><strong>Hash On-Chain (Sepolia):</strong> <span id="verifValidOnchain"
                                 class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> <span id="verifValidDoctor">-</span>
+                        <div class="mt-1"><strong>Dokter Terakhir:</strong> <span id="verifValidDoctor">-</span>
                             (<code id="verifValidOnchainDoctor">-</code>)</div>
                         <div class="mt-1"><strong>Timestamp On-Chain:</strong> <span id="verifValidTimestamp">-</span></div>
                         <div class="mt-1" id="verifValidTxWrap">
@@ -50,9 +50,9 @@
             <div class="d-flex align-items-start">
                 <i class="bi bi-exclamation-triangle-fill fs-4 me-3"></i>
                 <div class="w-100">
-                    <strong>PERINGATAN! Integritas Data Tidak Cocok (Dimodifikasi) — <span
+                    <strong><span id="verifInvalidHeading">PERINGATAN! Integritas Data Tidak Cocok (Dimodifikasi)</span> — <span
                             id="verifInvalidCode">-</span></strong><br>
-                    <span class="small d-block mb-2">Isi rekam medis di database tidak sesuai dengan catatan asli di
+                    <span id="verifInvalidDesc" class="small d-block mb-2">Isi rekam medis di database tidak sesuai dengan catatan asli di
                         Blockchain Sepolia!</span>
                     <div class="bg-white text-dark p-2 rounded border small">
                         <div><strong>Hash On-Chain (Sepolia):</strong> <span id="verifInvalidOnchain"
@@ -61,7 +61,7 @@
                                 id="verifInvalidRecomputed" class="hash-code text-danger border-danger">-</span></div>
                         <div class="mt-1"><strong>Hash Tersimpan (current_hash):</strong> <span id="verifInvalidStored"
                                 class="hash-code">-</span></div>
-                        <div class="mt-1"><strong>Dokter Terakhir Mengakses:</strong> <span id="verifInvalidDoctor">-</span>
+                        <div class="mt-1"><strong>Dokter Terakhir:</strong> <span id="verifInvalidDoctor">-</span>
                             (<code id="verifInvalidOnchainDoctor">-</code>)</div>
                         <div class="mt-1"><strong>Timestamp On-Chain:</strong> <span id="verifInvalidTimestamp">-</span>
                         </div>
@@ -113,7 +113,7 @@
                             <th>No</th>
                             <th>ID Rekam</th>
                             <th>Tanggal</th>
-                            <th>Dokter</th>
+                            <th>Dokter Terakhir</th>
                             <th>Diagnosis</th>
                             <th>Aksi</th>
                         </tr>
@@ -160,7 +160,7 @@
                 </div>
                 <div class="modal-body small">
                     <p class="mb-1"><strong>Tanggal Pemeriksaan:</strong> <span id="pasienDetailDate">-</span></p>
-                    <p class="mb-2"><strong>Dokter Pemeriksa:</strong> <span id="pasienDetailDoctor">-</span></p>
+                    <p class="mb-2"><strong>Dokter Terakhir:</strong> <span id="pasienDetailDoctor">-</span></p>
                     <hr>
                     <p class="mb-2"><strong>Keluhan (Complaint):</strong><br><span id="pasienDetailComplaint">-</span></p>
                     <p class="mb-2"><strong>Diagnosis:</strong><br><span id="pasienDetailDiagnosis">-</span></p>

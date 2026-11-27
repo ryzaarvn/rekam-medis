@@ -19,7 +19,32 @@ beforeEach(function () {
     Config::set('blockchain.rpc_url', 'https://eth-sepolia.example.test/v2/test-key');
     Config::set('blockchain.rpc_connect_timeout', 2);
     Config::set('blockchain.rpc_timeout', 5);
+    Config::set('blockchain.receipt_max_attempts', 3);
+    Config::set('blockchain.receipt_retry_delay_ms', 0);
 });
+
+function servicePadAddressTopic(string $address): string
+{
+    return '0x'.str_pad(substr(strtolower($address), 2), 64, '0', STR_PAD_LEFT);
+}
+
+function serviceMakeReceipt(
+    string $txHash,
+    string $from,
+    string $to,
+    string $status,
+    array $logs,
+    string $blockNumberHex = '0x6ad3c2',
+): array {
+    return [
+        'transactionHash' => strtolower($txHash),
+        'from' => strtolower($from),
+        'to' => strtolower($to),
+        'status' => $status,
+        'blockNumber' => $blockNumberHex,
+        'logs' => $logs,
+    ];
+}
 
 it('reads chain id and normalized contract address from blockchain config', function () {
     $service = app(BlockchainService::class);
@@ -28,7 +53,7 @@ it('reads chain id and normalized contract address from blockchain config', func
     expect(config('blockchain.contract_address'))->toBe('0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4');
 });
 
-it('computes identical canonical SHA-256 hashes across create array, update array, and persisted model', function () {
+it('computes identical canonical SHA-256 hashes using domain codes across create array, update array, and persisted model', function () {
     $service = app(BlockchainService::class);
 
     $doctorUser = User::create([
@@ -62,8 +87,8 @@ it('computes identical canonical SHA-256 hashes across create array, update arra
 
     $createPayload = [
         'record_code' => 'MR001',
-        'patient_id' => $patient->id,
-        'doctor_id' => $doctor->id,
+        'patient_code' => $patient->patient_code,
+        'doctor_code' => $doctor->doctor_code,
         'record_date' => '2026-11-26',
         'complaint' => 'Demam tinggi',
         'diagnosis' => 'Infeksi virus',
@@ -73,18 +98,25 @@ it('computes identical canonical SHA-256 hashes across create array, update arra
     $createHash = $service->hashMedicalRecord($createPayload);
 
     $record = MedicalRecord::create([
-        ...$createPayload,
+        'record_code' => 'MR001',
+        'patient_id' => $patient->id,
+        'doctor_id' => $doctor->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam tinggi',
+        'diagnosis' => 'Infeksi virus',
+        'treatment' => 'Paracetamol',
+        'notes' => null,
         'current_hash' => $createHash,
     ]);
 
     expect($service->hashMedicalRecord($record))
         ->toBe($createHash)
-        ->toBe('0x94c0ea9d45919e34fae201bd5cbdd9252359e5e0d756344f49f7f88b1c7af48b');
+        ->toBe('0x8c3abcfaf0dfde354421c3695e0dfd83255a18e3c48eea5a8fa5379d053e518e');
 
     $updatePayload = [
         'record_code' => $record->record_code,
-        'patient_id' => $record->patient_id,
-        'doctor_id' => $record->doctor_id,
+        'patient_code' => $patient->patient_code,
+        'doctor_code' => $doctor->doctor_code,
         'record_date' => '2026-11-26',
         'complaint' => 'Demam tinggi',
         'diagnosis' => 'Infeksi virus membaik',
@@ -94,7 +126,11 @@ it('computes identical canonical SHA-256 hashes across create array, update arra
     $updateHash = $service->hashMedicalRecord($updatePayload);
 
     $record->update([
-        ...$updatePayload,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam tinggi',
+        'diagnosis' => 'Infeksi virus membaik',
+        'treatment' => 'Paracetamol 500mg',
+        'notes' => 'Kontrol ulang 3 hari',
         'current_hash' => $updateHash,
     ]);
     $record->refresh();
@@ -207,11 +243,8 @@ it('calls hasAccess and isDoctorRegistered via eth_call with padded lowercase ad
 
     $service = app(BlockchainService::class);
 
-    $hasAccess = $service->hasAccess($patientAddress, $doctorAddress);
-    $isRegistered = $service->isDoctorRegistered($doctorAddress);
-
-    expect($hasAccess)->toBeTrue();
-    expect($isRegistered)->toBeFalse();
+    expect($service->hasAccess($patientAddress, $doctorAddress))->toBeTrue();
+    expect($service->isDoctorRegistered($doctorAddress))->toBeFalse();
 
     Http::assertSent(fn (Request $request): bool => $request['params'][0]['data'] === $expectedHasAccessData);
     Http::assertSent(fn (Request $request): bool => $request['params'][0]['data'] === $expectedDoctorRegisteredData);
@@ -274,22 +307,52 @@ it('decodes solidity revert reason when rpc returns an execution reverted error'
         ]),
     ]);
 
-    expect(fn () => app(BlockchainService::class)->getMedicalRecordHash('MR404'))
-        ->toThrow(BlockchainException::class, 'Rekam medis tidak ditemukan');
+    try {
+        app(BlockchainService::class)->getMedicalRecord('MR404');
+        $this->fail('Expected BlockchainException was not thrown.');
+    } catch (BlockchainException $exception) {
+        expect($exception->getMessage())->toContain('Rekam medis tidak ditemukan')
+            ->and($exception->revertReason())->toBe('Rekam medis tidak ditemukan')
+            ->and($exception->getHttpStatus())->toBe(502);
+    }
 });
 
-it('throws BlockchainException when rpc returns empty abi data', function () {
+it('wraps non-json html 502 and 503 rpc responses into BlockchainException instead of RequestException', function (int $statusCode, string $htmlBody) {
     Http::preventStrayRequests();
 
     Http::fake([
-        'https://eth-sepolia.example.test/v2/test-key' => Http::response([
-            'jsonrpc' => '2.0',
-            'id' => 1,
-            'result' => '0x',
+        'https://eth-sepolia.example.test/v2/test-key' => Http::response($htmlBody, $statusCode, [
+            'Content-Type' => 'text/html',
         ]),
     ]);
 
-    expect(fn () => app(BlockchainService::class)->isDoctorRegistered('0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678'))
+    try {
+        app(BlockchainService::class)->getMedicalRecord('MR001');
+        $this->fail('Expected BlockchainException was not thrown.');
+    } catch (BlockchainException $exception) {
+        expect($exception->getMessage())->toContain("HTTP {$statusCode}")
+            ->and($exception->getHttpStatus())->toBe(502);
+    }
+})->with([
+    '502 Bad Gateway' => [502, '<html><body><h1>502 Bad Gateway</h1></body></html>'],
+    '503 Service Unavailable' => [503, '<html><body><h1>503 Service Unavailable</h1></body></html>'],
+]);
+
+it('throws BlockchainException when rpc returns json missing both result and error or empty abi data', function () {
+    Http::preventStrayRequests();
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x']),
+    ]);
+
+    $service = app(BlockchainService::class);
+
+    expect(fn () => $service->isDoctorRegistered('0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678'))
+        ->toThrow(BlockchainException::class, 'Respons RPC tidak valid');
+
+    expect(fn () => $service->isDoctorRegistered('0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678'))
         ->toThrow(BlockchainException::class, 'Respons RPC tidak valid');
 });
 
@@ -315,4 +378,238 @@ it('throws BlockchainException when rpc url or contract address configuration is
 
     expect(fn () => app(BlockchainService::class)->isDoctorRegistered('0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678'))
         ->toThrow(BlockchainException::class, 'blockchain.contract_address');
+});
+
+it('retries eth_getTransactionReceipt when result is initially null and parses hex blockNumber', function () {
+    Http::preventStrayRequests();
+
+    $txHash = '0x'.str_repeat('a', 64);
+    $sender = '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3';
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => null])
+            ->push([
+                'jsonrpc' => '2.0',
+                'id' => 1,
+                'result' => serviceMakeReceipt($txHash, $sender, $contract, '0x1', [], '0x6ad3c2'),
+            ]),
+    ]);
+
+    $receipt = app(BlockchainService::class)->getTransactionReceipt($txHash, $sender);
+
+    expect($receipt['tx_hash'])->toBe($txHash)
+        ->and($receipt['block_number'])->toBe(7001026)
+        ->and($receipt['from'])->toBe($sender)
+        ->and($receipt['to'])->toBe($contract)
+        ->and($receipt['status'])->toBe('0x1');
+
+    Http::assertSentCount(2);
+});
+
+it('throws 422 verification BlockchainException for missing, reverted, wrong-contract, or wrong-sender receipts', function (array $rpcResults, string $expectedError) {
+    Http::preventStrayRequests();
+
+    $txHash = '0x'.str_repeat('b', 64);
+    $expectedSender = '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3';
+
+    $sequence = Http::sequence();
+    foreach ($rpcResults as $result) {
+        $sequence->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $result]);
+    }
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => $sequence,
+    ]);
+
+    try {
+        app(BlockchainService::class)->getTransactionReceipt($txHash, $expectedSender);
+        $this->fail('Expected BlockchainException was not thrown.');
+    } catch (BlockchainException $exception) {
+        expect($exception->getHttpStatus())->toBe(422)
+            ->and($exception->getMessage())->toContain($expectedError);
+    }
+})->with([
+    'null after retries' => [[null, null, null], 'tidak ditemukan'],
+    'reverted status 0x0' => [[serviceMakeReceipt('0x'.str_repeat('b', 64), '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3', '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4', '0x0', [])], 'reverted'],
+    'wrong contract to address' => [[serviceMakeReceipt('0x'.str_repeat('b', 64), '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3', '0x9999999999999999999999999999999999999999', '0x1', [])], 'tidak cocok dengan smart contract'],
+    'wrong sender from address' => [[serviceMakeReceipt('0x'.str_repeat('b', 64), '0x1111111111111111111111111111111111111111', '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4', '0x1', [])], 'Pengirim transaksi'],
+]);
+
+it('verifies all admin and patient role lifecycle transactions with matching events and current on-chain state', function () {
+    Http::preventStrayRequests();
+
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+    $admin = '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3';
+    $doctor = '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    $patient = '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890';
+    $tx = fn (string $c): string => '0x'.str_repeat($c, 64);
+
+    $boolTrue = '0x'.str_repeat('0', 63).'1';
+    $boolFalse = '0x'.str_repeat('0', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            // 1. DoctorAdded
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx('1'), $admin, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => ['0x69908b2e63170aa89ef89719bbe3b4c92cccc38653968ab25f4464eff7c28ac8', servicePadAddressTopic($doctor)],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $boolTrue])
+            // 2. DoctorRemoved
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx('2'), $admin, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => ['0x493d7cf6a7c880406a55654d6727464ea088bd01d40498e1987a327e68961ab8', servicePadAddressTopic($doctor)],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $boolFalse])
+            // 3. PatientAdded
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx('3'), $admin, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => ['0xa58cff07db0adda3ab7a40bd2f18ab57210bf38391a52ffd2e8eee6b8bdec71a', servicePadAddressTopic($patient)],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $boolTrue])
+            // 4. PatientRemoved
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx('4'), $admin, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => ['0x053a4badf166f01c4b02f6bcb71d2d67734470d0866282e291e73001aa25c769', servicePadAddressTopic($patient)],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $boolFalse])
+            // 5. AccessGranted
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx('5'), $patient, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => [
+                    '0x9f520b3bfc56d06f7065d10b4683b3f57ac8895d5026cd176dee95ce1454cb8d',
+                    servicePadAddressTopic($patient),
+                    servicePadAddressTopic($doctor),
+                ],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $boolTrue])
+            // 6. AccessRevoked
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx('6'), $patient, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => [
+                    '0x825c8be24eb0df19500f63e86c29e7d0d951e73056b889b891d85e40938d9b6e',
+                    servicePadAddressTopic($patient),
+                    servicePadAddressTopic($doctor),
+                ],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => $boolFalse]),
+    ]);
+
+    $service = app(BlockchainService::class);
+
+    expect($service->verifyDoctorAddedTransaction($tx('1'), $admin, $doctor)['tx_hash'])->toBe($tx('1'));
+    expect($service->verifyDoctorRemovedTransaction($tx('2'), $admin, $doctor)['tx_hash'])->toBe($tx('2'));
+    expect($service->verifyPatientAddedTransaction($tx('3'), $admin, $patient)['tx_hash'])->toBe($tx('3'));
+    expect($service->verifyPatientRemovedTransaction($tx('4'), $admin, $patient)['tx_hash'])->toBe($tx('4'));
+    expect($service->verifyAccessGrantedTransaction($tx('5'), $patient, $doctor)['tx_hash'])->toBe($tx('5'));
+    expect($service->verifyAccessRevokedTransaction($tx('6'), $patient, $doctor)['tx_hash'])->toBe($tx('6'));
+});
+
+it('rejects verifyDoctorAddedTransaction when event topic mismatches or current on-chain state is inactive', function () {
+    Http::preventStrayRequests();
+
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+    $admin = '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3';
+    $doctor = '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    $tx = '0x'.str_repeat('7', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            // Wrong event topic0
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx, $admin, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => ['0x'.str_repeat('f', 64), servicePadAddressTopic($doctor)],
+                'data' => '0x',
+            ]])])
+            // Valid event, but isDoctorRegistered returns false (e.g., replay after removal)
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($tx, $admin, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => ['0x69908b2e63170aa89ef89719bbe3b4c92cccc38653968ab25f4464eff7c28ac8', servicePadAddressTopic($doctor)],
+                'data' => '0x',
+            ]])])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => '0x'.str_repeat('0', 64)]),
+    ]);
+
+    $service = app(BlockchainService::class);
+
+    expect(fn () => $service->verifyDoctorAddedTransaction($tx, $admin, $doctor))
+        ->toThrow(BlockchainException::class, 'Event smart contract yang diharapkan tidak ditemukan');
+
+    expect(fn () => $service->verifyDoctorAddedTransaction($tx, $admin, $doctor))
+        ->toThrow(BlockchainException::class, 'tidak aktif di smart contract Sepolia');
+});
+
+it('verifies MedicalRecordAdded and MedicalRecordUpdated receipts and rejects mismatched hash data', function () {
+    Http::preventStrayRequests();
+
+    $contract = '0x6d1c13645e2b1ca4f4dfb6a4bbd22daa8072f4a4';
+    $doctor = '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    $patient = '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890';
+    $recordId = BlockchainService::encodeRecordId('MR001');
+    $expectedHash = '0x8c3abcfaf0dfde354421c3695e0dfd83255a18e3c48eea5a8fa5379d053e518e';
+    $wrongHash = '0x'.str_repeat('9', 64);
+    $timestampWord = str_pad(dechex(1795680000), 64, '0', STR_PAD_LEFT);
+    $txAdd = '0x'.str_repeat('a', 64);
+    $txUpdate = '0x'.str_repeat('b', 64);
+
+    Http::fake([
+        'https://eth-sepolia.example.test/v2/test-key' => Http::sequence()
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($txAdd, $doctor, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => [
+                    '0x30ce74f24973c3793a1a44ecce360de22f3a981e9e7a4b1aed68c6c3611d54a2',
+                    $recordId,
+                    servicePadAddressTopic($patient),
+                    servicePadAddressTopic($doctor),
+                ],
+                'data' => $expectedHash.$timestampWord,
+            ]], '0x6ad4aa')])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($txUpdate, $doctor, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => [
+                    '0xfdaac535c2479f1b829c9d1d754dd8e4739233afe60a0917d08855ef393fa4d9',
+                    $recordId,
+                    servicePadAddressTopic($patient),
+                    servicePadAddressTopic($doctor),
+                ],
+                'data' => $expectedHash.$timestampWord,
+            ]], '0x6ad892')])
+            ->push(['jsonrpc' => '2.0', 'id' => 1, 'result' => serviceMakeReceipt($txUpdate, $doctor, $contract, '0x1', [[
+                'address' => $contract,
+                'topics' => [
+                    '0xfdaac535c2479f1b829c9d1d754dd8e4739233afe60a0917d08855ef393fa4d9',
+                    $recordId,
+                    servicePadAddressTopic($patient),
+                    servicePadAddressTopic($doctor),
+                ],
+                'data' => $wrongHash.$timestampWord,
+            ]], '0x6ad892')]),
+    ]);
+
+    $service = app(BlockchainService::class);
+
+    $added = $service->verifyMedicalRecordAddedTransaction($txAdd, $doctor, 'MR001', $patient, $expectedHash);
+    expect($added)->toBe([
+        'tx_hash' => $txAdd,
+        'block_number' => 7001258,
+        'onchain_hash' => $expectedHash,
+    ]);
+
+    $updated = $service->verifyMedicalRecordUpdatedTransaction($txUpdate, $doctor, 'MR001', $patient, $expectedHash);
+    expect($updated)->toBe([
+        'tx_hash' => $txUpdate,
+        'block_number' => 7002258,
+        'onchain_hash' => $expectedHash,
+    ]);
+
+    expect(fn () => $service->verifyMedicalRecordUpdatedTransaction($txUpdate, $doctor, 'MR001', $patient, $expectedHash))
+        ->toThrow(BlockchainException::class, 'Hash rekam medis pada event blockchain tidak cocok');
 });

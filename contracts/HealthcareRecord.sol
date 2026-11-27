@@ -8,10 +8,12 @@ contract HealthcareRecord {
     // ===== Struct =====
     struct Doctor {
         bool isRegistered;
+        uint256 accessVersion;
     }
 
     struct Patient {
         bool isRegistered;
+        uint256 accessVersion;
     }
 
     struct MedicalRecord {
@@ -26,10 +28,16 @@ contract HealthcareRecord {
     mapping(address => Doctor) public doctors;
     mapping(address => Patient) public patients;
     mapping(bytes32 => MedicalRecord) public medicalRecords;
-    // accessPermissions[pasien][dokter] = true/false
-    mapping(address => mapping(address => bool)) public accessPermissions;
+
+    // _accessPermissions[patient][patientVersion][doctor][doctorVersion] = true/false
+    mapping(address => mapping(uint256 => mapping(address => mapping(uint256 => bool))))
+        private _accessPermissions;
 
     // ===== Events =====
+    event AdminTransferred(
+        address indexed previousAdmin,
+        address indexed newAdmin
+    );
     event DoctorAdded(address indexed doctor);
     event DoctorRemoved(address indexed doctor);
     event PatientAdded(address indexed patient);
@@ -51,7 +59,7 @@ contract HealthcareRecord {
         uint256 timestamp
     );
 
-    // ===== Modifier =====
+    // ===== Modifiers =====
     modifier onlyAdmin() {
         require(msg.sender == admin, "Hanya admin");
         _;
@@ -72,13 +80,56 @@ contract HealthcareRecord {
         admin = msg.sender;
     }
 
+    // ===== Fungsi Internal =====
+    function _hasActiveAccess(
+        address _patient,
+        address _doctor
+    ) internal view returns (bool) {
+        if (
+            !patients[_patient].isRegistered || !doctors[_doctor].isRegistered
+        ) {
+            return false;
+        }
+
+        return
+            _accessPermissions[_patient][patients[_patient].accessVersion][
+                _doctor
+            ][doctors[_doctor].accessVersion];
+    }
+
+    // ===== Fungsi Admin: Manajemen Admin =====
+    function transferAdmin(address _newAdmin) external onlyAdmin {
+        require(_newAdmin != address(0), "Alamat admin baru tidak valid");
+        require(_newAdmin != admin, "Alamat sudah menjadi admin");
+        require(
+            !doctors[_newAdmin].isRegistered,
+            "Alamat sedang terdaftar sebagai dokter"
+        );
+        require(
+            !patients[_newAdmin].isRegistered,
+            "Alamat sedang terdaftar sebagai pasien"
+        );
+
+        address previousAdmin = admin;
+        admin = _newAdmin;
+        emit AdminTransferred(previousAdmin, _newAdmin);
+    }
+
     // ===== Fungsi Admin: Dokter =====
     function addDoctor(address _doctor) external onlyAdmin {
         require(_doctor != address(0), "Alamat dokter tidak valid");
+        require(
+            _doctor != admin,
+            "Alamat admin tidak dapat didaftarkan sebagai dokter"
+        );
         require(!doctors[_doctor].isRegistered, "Dokter sudah terdaftar");
-        require(!patients[_doctor].isRegistered, "Alamat sudah terdaftar sebagai pasien");
+        require(
+            !patients[_doctor].isRegistered,
+            "Alamat sudah terdaftar sebagai pasien"
+        );
 
         doctors[_doctor].isRegistered = true;
+        doctors[_doctor].accessVersion += 1;
         emit DoctorAdded(_doctor);
     }
 
@@ -86,16 +137,25 @@ contract HealthcareRecord {
         require(doctors[_doctor].isRegistered, "Dokter belum terdaftar");
 
         doctors[_doctor].isRegistered = false;
+        doctors[_doctor].accessVersion += 1;
         emit DoctorRemoved(_doctor);
     }
 
     // ===== Fungsi Admin: Pasien =====
     function addPatient(address _patient) external onlyAdmin {
         require(_patient != address(0), "Alamat pasien tidak valid");
+        require(
+            _patient != admin,
+            "Alamat admin tidak dapat didaftarkan sebagai pasien"
+        );
         require(!patients[_patient].isRegistered, "Pasien sudah terdaftar");
-        require(!doctors[_patient].isRegistered, "Alamat sudah terdaftar sebagai dokter");
+        require(
+            !doctors[_patient].isRegistered,
+            "Alamat sudah terdaftar sebagai dokter"
+        );
 
         patients[_patient].isRegistered = true;
+        patients[_patient].accessVersion += 1;
         emit PatientAdded(_patient);
     }
 
@@ -103,23 +163,35 @@ contract HealthcareRecord {
         require(patients[_patient].isRegistered, "Pasien belum terdaftar");
 
         patients[_patient].isRegistered = false;
+        patients[_patient].accessVersion += 1;
         emit PatientRemoved(_patient);
     }
 
     // ===== Fungsi Pasien =====
     function grantAccess(address _doctor) external onlyRegisteredPatient {
         require(doctors[_doctor].isRegistered, "Dokter belum terdaftar");
-        require(_doctor != msg.sender, "Tidak dapat memberi izin ke diri sendiri");
-        require(!accessPermissions[msg.sender][_doctor], "Izin sudah diberikan");
+        require(
+            _doctor != msg.sender,
+            "Tidak dapat memberi izin ke diri sendiri"
+        );
 
-        accessPermissions[msg.sender][_doctor] = true;
+        uint256 patientVer = patients[msg.sender].accessVersion;
+        uint256 doctorVer = doctors[_doctor].accessVersion;
+        require(
+            !_accessPermissions[msg.sender][patientVer][_doctor][doctorVer],
+            "Izin sudah diberikan"
+        );
+
+        _accessPermissions[msg.sender][patientVer][_doctor][doctorVer] = true;
         emit AccessGranted(msg.sender, _doctor);
     }
 
     function revokeAccess(address _doctor) external onlyRegisteredPatient {
-        require(accessPermissions[msg.sender][_doctor], "Izin belum ada");
+        require(_hasActiveAccess(msg.sender, _doctor), "Izin belum ada");
 
-        accessPermissions[msg.sender][_doctor] = false;
+        uint256 patientVer = patients[msg.sender].accessVersion;
+        uint256 doctorVer = doctors[_doctor].accessVersion;
+        _accessPermissions[msg.sender][patientVer][_doctor][doctorVer] = false;
         emit AccessRevoked(msg.sender, _doctor);
     }
 
@@ -132,7 +204,10 @@ contract HealthcareRecord {
         require(_recordId != bytes32(0), "recordId tidak boleh kosong");
         require(_patient != address(0), "Alamat pasien tidak valid");
         require(patients[_patient].isRegistered, "Pasien belum terdaftar");
-        require(accessPermissions[_patient][msg.sender], "Dokter belum diberi izin");
+        require(
+            _hasActiveAccess(_patient, msg.sender),
+            "Dokter belum diberi izin"
+        );
         require(!medicalRecords[_recordId].exists, "recordId sudah dipakai");
         require(_recordHash != bytes32(0), "Hash tidak boleh kosong");
 
@@ -157,11 +232,17 @@ contract HealthcareRecord {
         bytes32 _recordId,
         bytes32 _newRecordHash
     ) external onlyRegisteredDoctor {
-        require(medicalRecords[_recordId].exists, "Rekam medis tidak ditemukan");
+        require(
+            medicalRecords[_recordId].exists,
+            "Rekam medis tidak ditemukan"
+        );
 
         address patient = medicalRecords[_recordId].patient;
         require(patients[patient].isRegistered, "Pasien belum terdaftar");
-        require(accessPermissions[patient][msg.sender], "Dokter belum diberi izin");
+        require(
+            _hasActiveAccess(patient, msg.sender),
+            "Dokter belum diberi izin"
+        );
         require(_newRecordHash != bytes32(0), "Hash tidak boleh kosong");
 
         medicalRecords[_recordId].recordHash = _newRecordHash;
@@ -178,12 +259,19 @@ contract HealthcareRecord {
     }
 
     // ===== Fungsi Pendukung & Verifikasi (Read-Only / Gratis Gas) =====
-    function getMedicalRecordHash(bytes32 _recordId) external view returns (bytes32) {
-        require(medicalRecords[_recordId].exists, "Rekam medis tidak ditemukan");
+    function getMedicalRecordHash(
+        bytes32 _recordId
+    ) external view returns (bytes32) {
+        require(
+            medicalRecords[_recordId].exists,
+            "Rekam medis tidak ditemukan"
+        );
         return medicalRecords[_recordId].recordHash;
     }
 
-    function getMedicalRecord(bytes32 _recordId)
+    function getMedicalRecord(
+        bytes32 _recordId
+    )
         external
         view
         returns (
@@ -193,7 +281,10 @@ contract HealthcareRecord {
             uint256 timestamp
         )
     {
-        require(medicalRecords[_recordId].exists, "Rekam medis tidak ditemukan");
+        require(
+            medicalRecords[_recordId].exists,
+            "Rekam medis tidak ditemukan"
+        );
         MedicalRecord storage rec = medicalRecords[_recordId];
         return (rec.recordHash, rec.patient, rec.doctor, rec.timestamp);
     }
@@ -208,15 +299,20 @@ contract HealthcareRecord {
         return medicalRecords[_recordId].recordHash == _offchainHash;
     }
 
-    function hasAccess(address _patient, address _doctor) external view returns (bool) {
-        return accessPermissions[_patient][_doctor];
+    function hasAccess(
+        address _patient,
+        address _doctor
+    ) external view returns (bool) {
+        return _hasActiveAccess(_patient, _doctor);
     }
 
     function isDoctorRegistered(address _doctor) external view returns (bool) {
         return doctors[_doctor].isRegistered;
     }
 
-    function isPatientRegistered(address _patient) external view returns (bool) {
+    function isPatientRegistered(
+        address _patient
+    ) external view returns (bool) {
         return patients[_patient].isRegistered;
     }
 }

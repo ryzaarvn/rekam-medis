@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Dokter;
 
+use App\Exceptions\BlockchainException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Dokter\PrepareStoreMedicalRecordRequest;
 use App\Http\Requests\Dokter\PrepareUpdateMedicalRecordRequest;
@@ -41,11 +42,19 @@ class MedicalRecordController extends Controller
     }
 
     /**
-     * Display medical records authored by this doctor or owned by currently authorizing patients.
+     * Display medical records owned by patients currently authorizing this active on-chain doctor.
      */
     public function index(Request $request): View
     {
         $doctor = $this->resolveDoctor($request);
+
+        if (! $doctor->is_registered_onchain) {
+            return view('dokter.records.index', [
+                'doctor' => $doctor,
+                'records' => collect(),
+                'authorizedPatientIds' => [],
+            ]);
+        }
 
         $authorizedPatientIds = $doctor->authorizedPatients()
             ->registeredOnchain()
@@ -53,18 +62,14 @@ class MedicalRecordController extends Controller
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
 
-        $records = MedicalRecord::query()
-            ->with(['patient.user', 'doctor', 'latestLogBlockchain', 'logBlockchains.doctor'])
-            ->where(function ($query) use ($doctor, $authorizedPatientIds): void {
-                $query->where('doctor_id', $doctor->id);
-
-                if ($authorizedPatientIds !== []) {
-                    $query->orWhereIn('patient_id', $authorizedPatientIds);
-                }
-            })
-            ->orderByDesc('record_date')
-            ->orderByDesc('id')
-            ->get();
+        $records = $authorizedPatientIds === []
+            ? collect()
+            : MedicalRecord::query()
+                ->with(['patient.user', 'doctor', 'latestLogBlockchain', 'logBlockchains.doctor'])
+                ->whereIn('patient_id', $authorizedPatientIds)
+                ->orderByDesc('record_date')
+                ->orderByDesc('id')
+                ->get();
 
         return view('dokter.records.index', [
             'doctor' => $doctor,
@@ -74,7 +79,7 @@ class MedicalRecordController extends Controller
     }
 
     /**
-     * Validate inputs and authorization, generate record_code, and compute canonical SHA-256 hash.
+     * Validate inputs and authorization, generate record_code atomically, and compute canonical SHA-256 hash.
      */
     public function prepareStore(
         PrepareStoreMedicalRecordRequest $request,
@@ -85,13 +90,14 @@ class MedicalRecordController extends Controller
         $patientId = (int) $validated['patient_id'];
 
         $patient = $this->ensureDoctorAuthorizedForPatient($doctor, $patientId);
+        $recordCode = CodeGenerator::nextMedicalRecordCode();
 
-        $recordCode = CodeGenerator::nextCode(
-            'MR',
-            MedicalRecord::query()->pluck('record_code'),
+        $payload = $this->buildHashPayload(
+            $recordCode,
+            $patient->patient_code,
+            $doctor->doctor_code,
+            $validated,
         );
-
-        $payload = $this->buildHashPayload($recordCode, $patientId, $doctor->id, $validated);
         $currentHash = $blockchainService->hashMedicalRecord($payload);
 
         return response()->json([
@@ -104,22 +110,23 @@ class MedicalRecordController extends Controller
     }
 
     /**
-     * Recompute hash, persist the medical record and CREATE blockchain audit log atomically.
+     * Recompute hash, verify Sepolia receipt & event, and persist the medical record and CREATE log atomically.
      */
     public function store(
         StoreMedicalRecordRequest $request,
         BlockchainService $blockchainService,
     ): JsonResponse {
         $doctor = $this->resolveDoctor($request);
+        $doctor->loadMissing('user');
         $validated = $request->validated();
         $patientId = (int) $validated['patient_id'];
 
-        $this->ensureDoctorAuthorizedForPatient($doctor, $patientId);
+        $patient = $this->ensureDoctorAuthorizedForPatient($doctor, $patientId);
 
         $payload = $this->buildHashPayload(
             $validated['record_code'],
-            $patientId,
-            $doctor->id,
+            $patient->patient_code,
+            $doctor->doctor_code,
             $validated,
         );
         $expectedHash = $blockchainService->hashMedicalRecord($payload);
@@ -130,7 +137,21 @@ class MedicalRecordController extends Controller
             ], 422);
         }
 
-        $result = DB::transaction(function () use ($doctor, $patientId, $validated, $expectedHash): array {
+        try {
+            $verified = $blockchainService->verifyMedicalRecordAddedTransaction(
+                $validated['tx_hash'],
+                $doctor->user->wallet_address,
+                $validated['record_code'],
+                $patient->user->wallet_address,
+                $expectedHash,
+            );
+        } catch (BlockchainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], $exception->getHttpStatus());
+        }
+
+        $result = DB::transaction(function () use ($doctor, $patientId, $validated, $expectedHash, $verified): array {
             $medicalRecord = MedicalRecord::create([
                 'record_code' => $validated['record_code'],
                 'patient_id' => $patientId,
@@ -147,8 +168,8 @@ class MedicalRecordController extends Controller
                 'medical_record_id' => $medicalRecord->id,
                 'doctor_id' => $doctor->id,
                 'onchain_hash' => $expectedHash,
-                'tx_hash' => $validated['tx_hash'],
-                'block_number' => $validated['block_number'] ?? null,
+                'tx_hash' => $verified['tx_hash'],
+                'block_number' => $verified['block_number'],
                 'action_type' => LogBlockchain::ACTION_CREATE,
             ]);
 
@@ -167,12 +188,12 @@ class MedicalRecordController extends Controller
     }
 
     /**
-     * Show the elder-friendly medical record edit form for an authorized patient's record.
+     * Show the elder-friendly medical record edit form for an actively authorized on-chain patient's record.
      */
     public function edit(Request $request, MedicalRecord $medicalRecord): View
     {
         $doctor = $this->resolveDoctor($request);
-        $this->ensureDoctorAuthorizedForPatient($doctor, $medicalRecord->patient_id, requireOnchainRegistration: false);
+        $this->ensureDoctorAuthorizedForPatient($doctor, $medicalRecord->patient_id);
 
         $medicalRecord->load(['patient.user', 'latestLogBlockchain']);
 
@@ -191,15 +212,14 @@ class MedicalRecordController extends Controller
         BlockchainService $blockchainService,
     ): JsonResponse {
         $doctor = $this->resolveDoctor($request);
-        $this->ensureDoctorAuthorizedForPatient($doctor, $medicalRecord->patient_id);
+        $patient = $this->ensureDoctorAuthorizedForPatient($doctor, $medicalRecord->patient_id);
 
-        $medicalRecord->loadMissing('patient.user');
         $validated = $request->validated();
 
         $payload = $this->buildHashPayload(
             $medicalRecord->record_code,
-            $medicalRecord->patient_id,
-            $doctor->id,
+            $patient->patient_code,
+            $doctor->doctor_code,
             $validated,
         );
         $newHash = $blockchainService->hashMedicalRecord($payload);
@@ -208,13 +228,13 @@ class MedicalRecordController extends Controller
             'record_code' => $medicalRecord->record_code,
             'patient_id' => $medicalRecord->patient_id,
             'doctor_id' => $doctor->id,
-            'patient_wallet' => $medicalRecord->patient->user->wallet_address,
+            'patient_wallet' => $patient->user->wallet_address,
             'current_hash' => $newHash,
         ]);
     }
 
     /**
-     * Recompute hash, update the medical record, and insert an UPDATE blockchain audit log.
+     * Recompute hash, verify Sepolia receipt & event, update the medical record, and insert an UPDATE log.
      */
     public function update(
         UpdateMedicalRecordRequest $request,
@@ -222,14 +242,15 @@ class MedicalRecordController extends Controller
         BlockchainService $blockchainService,
     ): JsonResponse {
         $doctor = $this->resolveDoctor($request);
-        $this->ensureDoctorAuthorizedForPatient($doctor, $medicalRecord->patient_id);
+        $doctor->loadMissing('user');
+        $patient = $this->ensureDoctorAuthorizedForPatient($doctor, $medicalRecord->patient_id);
 
         $validated = $request->validated();
 
         $payload = $this->buildHashPayload(
             $medicalRecord->record_code,
-            $medicalRecord->patient_id,
-            $doctor->id,
+            $patient->patient_code,
+            $doctor->doctor_code,
             $validated,
         );
         $expectedHash = $blockchainService->hashMedicalRecord($payload);
@@ -240,7 +261,21 @@ class MedicalRecordController extends Controller
             ], 422);
         }
 
-        $result = DB::transaction(function () use ($medicalRecord, $doctor, $validated, $expectedHash): array {
+        try {
+            $verified = $blockchainService->verifyMedicalRecordUpdatedTransaction(
+                $validated['tx_hash'],
+                $doctor->user->wallet_address,
+                $medicalRecord->record_code,
+                $patient->user->wallet_address,
+                $expectedHash,
+            );
+        } catch (BlockchainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], $exception->getHttpStatus());
+        }
+
+        $result = DB::transaction(function () use ($medicalRecord, $doctor, $validated, $expectedHash, $verified): array {
             $medicalRecord->update([
                 'doctor_id' => $doctor->id,
                 'record_date' => $validated['record_date'],
@@ -255,8 +290,8 @@ class MedicalRecordController extends Controller
                 'medical_record_id' => $medicalRecord->id,
                 'doctor_id' => $doctor->id,
                 'onchain_hash' => $expectedHash,
-                'tx_hash' => $validated['tx_hash'],
-                'block_number' => $validated['block_number'] ?? null,
+                'tx_hash' => $verified['tx_hash'],
+                'block_number' => $verified['block_number'],
                 'action_type' => LogBlockchain::ACTION_UPDATE,
             ]);
 
@@ -291,18 +326,15 @@ class MedicalRecordController extends Controller
     /**
      * Verify active patient authorization and on-chain registration for both doctor and patient.
      */
-    private function ensureDoctorAuthorizedForPatient(
-        Doctor $doctor,
-        int $patientId,
-        bool $requireOnchainRegistration = true,
-    ): Patient {
-        if ($requireOnchainRegistration && ! $doctor->is_registered_onchain) {
+    private function ensureDoctorAuthorizedForPatient(Doctor $doctor, int $patientId): Patient
+    {
+        if (! $doctor->is_registered_onchain) {
             abort(403, 'Akun dokter Anda belum terdaftar aktif on-chain oleh Admin.');
         }
 
         $patient = Patient::query()->with('user')->findOrFail($patientId);
 
-        if ($requireOnchainRegistration && ! $patient->is_registered_onchain) {
+        if (! $patient->is_registered_onchain) {
             abort(403, 'Pasien ini belum terdaftar aktif on-chain oleh Admin.');
         }
 
@@ -327,14 +359,14 @@ class MedicalRecordController extends Controller
      */
     private function buildHashPayload(
         string $recordCode,
-        int $patientId,
-        int $doctorId,
+        string $patientCode,
+        string $doctorCode,
         array $validated,
     ): array {
         return [
             'record_code' => $recordCode,
-            'patient_id' => $patientId,
-            'doctor_id' => $doctorId,
+            'patient_code' => $patientCode,
+            'doctor_code' => $doctorCode,
             'record_date' => $validated['record_date'],
             'complaint' => $validated['complaint'],
             'diagnosis' => $validated['diagnosis'],

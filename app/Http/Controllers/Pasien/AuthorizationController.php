@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Pasien;
 
+use App\Exceptions\BlockchainException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Pasien\UpdateAuthorizationRequest;
 use App\Models\Authorization;
 use App\Models\Doctor;
 use App\Models\Patient;
+use App\Services\BlockchainService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -41,10 +43,13 @@ class AuthorizationController extends Controller
     }
 
     /**
-     * Persist grantAccess() authorization state after MetaMask confirms on Sepolia.
+     * Verify grantAccess() on Sepolia and persist authorization state.
      */
-    public function grant(UpdateAuthorizationRequest $request, Doctor $doctor): JsonResponse|RedirectResponse
-    {
+    public function grant(
+        UpdateAuthorizationRequest $request,
+        Doctor $doctor,
+        BlockchainService $blockchainService,
+    ): JsonResponse|RedirectResponse {
         $patient = $this->resolvePatient($request);
 
         if ($rejection = $this->rejectIfPatientNotOnchain($request, $patient)) {
@@ -62,6 +67,22 @@ class AuthorizationController extends Controller
         }
 
         $validated = $request->validated();
+        $patient->loadMissing('user');
+        $doctor->loadMissing('user');
+
+        try {
+            $blockchainService->verifyAccessGrantedTransaction(
+                $validated['tx_hash'],
+                $patient->user->wallet_address,
+                $doctor->user->wallet_address,
+            );
+        } catch (BlockchainException $exception) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $exception->getMessage()], $exception->getHttpStatus());
+            }
+
+            return redirect()->route('pasien.authorizations.index')->with('error', $exception->getMessage());
+        }
 
         $authorization = Authorization::updateOrCreate(
             [
@@ -88,10 +109,13 @@ class AuthorizationController extends Controller
     }
 
     /**
-     * Persist revokeAccess() authorization state after MetaMask confirms on Sepolia.
+     * Verify revokeAccess() on Sepolia and persist authorization state.
      */
-    public function revoke(UpdateAuthorizationRequest $request, Doctor $doctor): JsonResponse|RedirectResponse
-    {
+    public function revoke(
+        UpdateAuthorizationRequest $request,
+        Doctor $doctor,
+        BlockchainService $blockchainService,
+    ): JsonResponse|RedirectResponse {
         $patient = $this->resolvePatient($request);
 
         if ($rejection = $this->rejectIfPatientNotOnchain($request, $patient)) {
@@ -99,6 +123,22 @@ class AuthorizationController extends Controller
         }
 
         $validated = $request->validated();
+        $patient->loadMissing('user');
+        $doctor->loadMissing('user');
+
+        try {
+            $blockchainService->verifyAccessRevokedTransaction(
+                $validated['tx_hash'],
+                $patient->user->wallet_address,
+                $doctor->user->wallet_address,
+            );
+        } catch (BlockchainException $exception) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $exception->getMessage()], $exception->getHttpStatus());
+            }
+
+            return redirect()->route('pasien.authorizations.index')->with('error', $exception->getMessage());
+        }
 
         $authorization = Authorization::updateOrCreate(
             [
