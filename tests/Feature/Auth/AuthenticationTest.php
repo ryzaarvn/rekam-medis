@@ -174,3 +174,29 @@ it('renders the logout button in the sidebar footer for every role', function (s
     'dokter' => [User::ROLE_DOKTER, 'dokter.dashboard'],
     'pasien' => [User::ROLE_PASIEN, 'pasien.dashboard'],
 ]);
+
+it('preserves http URLs in testing environment and trusts reverse proxy HTTPS headers', function () {
+    expect(route('login'))->toStartWith('http://');
+
+    $this->get(route('login'))
+        ->assertOk()
+        ->assertSee('action="'.route('login.store').'"', false);
+
+    $this->get('/dashboard')
+        ->assertRedirect(route('login'));
+
+    $proxyHeaders = [
+        'X-Forwarded-Proto' => 'https',
+        'X-Forwarded-Host' => 'rekam-medis.vercel.app',
+        'X-Forwarded-Port' => '443',
+    ];
+
+    $this->withHeaders($proxyHeaders)
+        ->get('/dashboard')
+        ->assertRedirect('https://rekam-medis.vercel.app/login');
+
+    $this->withHeaders($proxyHeaders)
+        ->get('/login')
+        ->assertOk()
+        ->assertSee('action="https://rekam-medis.vercel.app/login"', false);
+});

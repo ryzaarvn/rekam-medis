@@ -97,6 +97,11 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'options' => extension_loaded('pdo_mysql') || extension_loaded('pdo_pgsql')
+                ? array_filter([
+                    PDO::ATTR_EMULATE_PREPARES => filter_var(env('DB_PGSQL_EMULATE_PREPARES', false), FILTER_VALIDATE_BOOL),
+                ], static fn (mixed $value): bool => $value === true)
+                : [],
         ],
 
         'sqlsrv' => [
