@@ -335,7 +335,7 @@ function setVerificationTxLink(wrapId, linkId, etherscanUrl, txHash) {
     }
 }
 
-function initPasienDashboard() {
+function initPasienRecords() {
     const jsonEl = document.getElementById('pasienRecordsJson');
     const recordsMap = jsonEl ? JSON.parse(jsonEl.textContent || '{}') : {};
 
@@ -500,8 +500,8 @@ document.addEventListener('DOMContentLoaded', () => {
         initDokterEditForm();
     } else if (page === 'dokter-records-index') {
         initDokterRecordsIndex();
-    } else if (page === 'pasien-dashboard') {
-        initPasienDashboard();
+    } else if (page === 'pasien-records') {
+        initPasienRecords();
     } else if (page === 'pasien-authorizations') {
         initPasienAuthorizations();
     }

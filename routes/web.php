@@ -1,12 +1,15 @@
 <?php
 
+use App\Http\Controllers\AccountController;
 use App\Http\Controllers\Admin\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Admin\DoctorController as AdminDoctorController;
 use App\Http\Controllers\Admin\PatientController as AdminPatientController;
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Dokter\DashboardController as DokterDashboardController;
 use App\Http\Controllers\Dokter\MedicalRecordController as DokterMedicalRecordController;
 use App\Http\Controllers\Pasien\AuthorizationController as PasienAuthorizationController;
 use App\Http\Controllers\Pasien\DashboardController as PasienDashboardController;
+use App\Http\Controllers\Pasien\RecordController as PasienRecordController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +26,10 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/dashboard', function (Request $request) {
         return redirect()->route($request->user()->dashboardRoute());
     })->name('dashboard');
+
+    Route::get('/account', [AccountController::class, 'edit'])->name('account.edit');
+    Route::put('/account/credentials', [AccountController::class, 'updateCredentials'])->name('account.credentials.update');
+    Route::put('/account/password', [AccountController::class, 'updatePassword'])->name('account.password.update');
 
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 });
@@ -52,8 +59,9 @@ Route::middleware(['auth', 'role:dokter'])
     ->prefix('dokter')
     ->name('dokter.')
     ->group(function (): void {
-        Route::get('/dashboard', [DokterMedicalRecordController::class, 'create'])->name('dashboard');
+        Route::get('/dashboard', [DokterDashboardController::class, 'index'])->name('dashboard');
         Route::get('/records', [DokterMedicalRecordController::class, 'index'])->name('records.index');
+        Route::get('/records/create', [DokterMedicalRecordController::class, 'create'])->name('records.create');
         Route::post('/records/prepare', [DokterMedicalRecordController::class, 'prepareStore'])->name('records.prepare');
         Route::post('/records', [DokterMedicalRecordController::class, 'store'])->name('records.store');
         Route::get('/records/{medicalRecord}/edit', [DokterMedicalRecordController::class, 'edit'])->name('records.edit');
@@ -66,7 +74,8 @@ Route::middleware(['auth', 'role:pasien'])
     ->name('pasien.')
     ->group(function (): void {
         Route::get('/dashboard', [PasienDashboardController::class, 'index'])->name('dashboard');
-        Route::post('/records/{medicalRecord}/verify', [PasienDashboardController::class, 'verify'])->name('records.verify');
+        Route::get('/records', [PasienRecordController::class, 'index'])->name('records.index');
+        Route::post('/records/{medicalRecord}/verify', [PasienRecordController::class, 'verify'])->name('records.verify');
 
         Route::get('/authorizations', [PasienAuthorizationController::class, 'index'])->name('authorizations.index');
         Route::post('/authorizations/{doctor}/grant', [PasienAuthorizationController::class, 'grant'])->name('authorizations.grant');

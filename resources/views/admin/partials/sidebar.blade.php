@@ -14,10 +14,7 @@
     </a>
 </li>
 <li>
-    <form method="POST" action="{{ route('logout') }}">
-        @csrf
-        <button type="submit" class="sidebar-logout-btn">
-            <i class="bi bi-box-arrow-left"></i> Keluar
-        </button>
-    </form>
+    <a href="{{ route('account.edit') }}" class="{{ request()->routeIs('account.*') ? 'active' : '' }}">
+        <i class="bi bi-person-circle"></i> Akun
+    </a>
 </li>

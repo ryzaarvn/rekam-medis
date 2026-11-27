@@ -172,14 +172,234 @@ it('generates sequential medical record codes safely via CodeGenerator::nextMedi
 it('shows only actively authorized on-chain patients in the doctor examination form', function () {
     $ctx = setupDoctorAndPatients();
 
-    $response = $this->actingAs($ctx['doctorUser'])->get(route('dokter.dashboard'));
+    $response = $this->actingAs($ctx['doctorUser'])->get(route('dokter.records.create'));
 
     $response->assertOk()
+        ->assertSee('data-page="dokter-record-create"', false)
         ->assertSee('Budi Santoso (PAT001)')
         ->assertSee('data-wallet="0xb2c3d4e5f60718293a4b5c6d7e8f901234567890"', false)
         ->assertDontSee('Rina Permata (PAT002)')
         ->assertDontSee('Dodi Pratama (PAT003)')
         ->assertDontSee('Dewi Pending (PAT004)');
+});
+
+it('displays filtered statistics and read-only tables on the doctor dashboard without shortcut buttons', function () {
+    $ctx = setupDoctorAndPatients();
+
+    $otherDoctorUser = User::factory()->dokter()->create([
+        'username' => 'dr_sari',
+        'wallet_address' => '0xf1e2d3c4b5a69788796a5b4c3d2e1f0011223344',
+    ]);
+    $otherDoctor = Doctor::create([
+        'doctor_code' => 'DOC002',
+        'user_id' => $otherDoctorUser->id,
+        'full_name' => 'Dr. Sari Dewi',
+        'specialization' => 'Anak',
+        'str_number' => 'STR-2026-0002',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('5', 64),
+    ]);
+
+    $ownRecord = MedicalRecord::create([
+        'record_code' => 'MR001',
+        'patient_id' => $ctx['authorizedPatient']->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam tinggi',
+        'diagnosis' => 'Infeksi virus',
+        'treatment' => 'Paracetamol 500mg',
+        'current_hash' => '0x'.str_repeat('a', 64),
+    ]);
+
+    $otherDoctorRecord = MedicalRecord::create([
+        'record_code' => 'MR002',
+        'patient_id' => $ctx['authorizedPatient']->id,
+        'doctor_id' => $otherDoctor->id,
+        'record_date' => '2026-11-25',
+        'complaint' => 'Batuk ringan',
+        'diagnosis' => 'ISPA',
+        'treatment' => 'Vitamin C',
+        'current_hash' => '0x'.str_repeat('b', 64),
+    ]);
+
+    $revokedRecord = MedicalRecord::create([
+        'record_code' => 'MR003',
+        'patient_id' => $ctx['revokedPatient']->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'record_date' => '2026-11-24',
+        'complaint' => 'Pusing',
+        'diagnosis' => 'Vertigo Tersembunyi',
+        'treatment' => 'Betahistine',
+        'current_hash' => '0x'.str_repeat('c', 64),
+    ]);
+
+    $unregisteredRecord = MedicalRecord::create([
+        'record_code' => 'MR004',
+        'patient_id' => $ctx['unregisteredAuthorizedPatient']->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'record_date' => '2026-11-23',
+        'complaint' => 'Sakit perut',
+        'diagnosis' => 'Gastritis Tersembunyi',
+        'treatment' => 'Antasida',
+        'current_hash' => '0x'.str_repeat('d', 64),
+    ]);
+
+    $ownCreateTx = '0x'.str_repeat('a', 63).'1';
+    $ownUpdateTx = '0x'.str_repeat('a', 63).'2';
+    $otherDoctorTx = '0x'.str_repeat('b', 63).'1';
+    $revokedTx = '0x'.str_repeat('c', 63).'1';
+    $unregisteredTx = '0x'.str_repeat('d', 63).'1';
+
+    LogBlockchain::create([
+        'medical_record_id' => $ownRecord->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'onchain_hash' => '0x'.str_repeat('1', 64),
+        'tx_hash' => $ownCreateTx,
+        'block_number' => 7000101,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
+
+    LogBlockchain::create([
+        'medical_record_id' => $ownRecord->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'onchain_hash' => '0x'.str_repeat('2', 64),
+        'tx_hash' => $ownUpdateTx,
+        'block_number' => 7000102,
+        'action_type' => LogBlockchain::ACTION_UPDATE,
+    ]);
+
+    LogBlockchain::create([
+        'medical_record_id' => $otherDoctorRecord->id,
+        'doctor_id' => $otherDoctor->id,
+        'onchain_hash' => '0x'.str_repeat('3', 64),
+        'tx_hash' => $otherDoctorTx,
+        'block_number' => 7000103,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
+
+    LogBlockchain::create([
+        'medical_record_id' => $revokedRecord->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'onchain_hash' => '0x'.str_repeat('4', 64),
+        'tx_hash' => $revokedTx,
+        'block_number' => 7000104,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
+
+    LogBlockchain::create([
+        'medical_record_id' => $unregisteredRecord->id,
+        'doctor_id' => $ctx['doctor']->id,
+        'onchain_hash' => '0x'.str_repeat('5', 64),
+        'tx_hash' => $unregisteredTx,
+        'block_number' => 7000105,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
+
+    $response = $this->actingAs($ctx['doctorUser'])->get(route('dokter.dashboard'));
+
+    $response->assertOk()
+        ->assertViewIs('dokter.dashboard')
+        ->assertViewHas('authorizedPatientsCount', 1)
+        ->assertViewHas('accessibleRecordsCount', 2)
+        ->assertViewHas('myLogsTotalCount', 2)
+        ->assertViewHas('myCreateLogsCount', 1)
+        ->assertViewHas('myUpdateLogsCount', 1)
+        ->assertSee('data-page="dokter-dashboard"', false)
+        ->assertSee('Status On-Chain')
+        ->assertSee('Terdaftar')
+        ->assertSee('DOC001 • Umum')
+        ->assertSee('1 CREATE • 1 UPDATE')
+        ->assertSee('Pasien Terotorisasi Aktif')
+        ->assertSee('Budi Santoso')
+        ->assertSee('PAT001')
+        ->assertSee('MR001')
+        ->assertSee('CREATE')
+        ->assertSee('UPDATE')
+        ->assertSee("https://sepolia.etherscan.io/tx/{$ownCreateTx}", false)
+        ->assertSee("https://sepolia.etherscan.io/tx/{$ownUpdateTx}", false)
+        ->assertDontSee('Rina Permata')
+        ->assertDontSee('PAT002')
+        ->assertDontSee('Dodi Pratama')
+        ->assertDontSee('PAT003')
+        ->assertDontSee('Dewi Pending')
+        ->assertDontSee('PAT004')
+        ->assertDontSee('MR003')
+        ->assertDontSee('MR004')
+        ->assertDontSee($otherDoctorTx, false)
+        ->assertDontSee($revokedTx, false)
+        ->assertDontSee($unregisteredTx, false);
+
+    $matchedSidebar = preg_match('/<aside[^>]*id="appSidebar"[^>]*>(.*?)<\/aside>/s', $response->getContent(), $sidebarMatches);
+    expect($matchedSidebar)->toBe(1)
+        ->and($sidebarMatches[1])->toContain('<a href="'.route('dokter.dashboard').'" class="active">')
+        ->and($sidebarMatches[1])->toContain(route('dokter.records.create'))
+        ->and($sidebarMatches[1])->toContain(route('dokter.records.index'))
+        ->and($sidebarMatches[1])->toContain(route('account.edit'));
+
+    $matchedMain = preg_match('/<main[^>]*class="content-area"[^>]*>(.*?)<\/main>/s', $response->getContent(), $mainMatches);
+    expect($matchedMain)->toBe(1)
+        ->and($mainMatches[1])->not->toContain(route('dokter.records.create'))
+        ->and($mainMatches[1])->not->toContain(route('dokter.records.index'))
+        ->and($mainMatches[1])->not->toContain(route('dokter.records.edit', $ownRecord))
+        ->and($mainMatches[1])->not->toContain(route('account.edit'))
+        ->and($mainMatches[1])->not->toContain('Catat Pemeriksaan')
+        ->and($mainMatches[1])->not->toContain('Lihat Semua')
+        ->and($mainMatches[1])->not->toContain('Detail')
+        ->and($mainMatches[1])->not->toContain('Edit');
+});
+
+it('shows zero statistics and empty tables on the doctor dashboard when the doctor is not registered on-chain', function () {
+    $unregistered = setupDoctorAndPatients(doctorOnchain: false);
+
+    $record = MedicalRecord::create([
+        'record_code' => 'MR777',
+        'patient_id' => $unregistered['authorizedPatient']->id,
+        'doctor_id' => $unregistered['doctor']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Demam',
+        'diagnosis' => 'Flu',
+        'treatment' => 'Istirahat',
+        'current_hash' => '0x'.str_repeat('a', 64),
+    ]);
+
+    LogBlockchain::create([
+        'medical_record_id' => $record->id,
+        'doctor_id' => $unregistered['doctor']->id,
+        'onchain_hash' => '0x'.str_repeat('b', 64),
+        'tx_hash' => '0x'.str_repeat('c', 64),
+        'block_number' => 7000200,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
+
+    $response = $this->actingAs($unregistered['doctorUser'])->get(route('dokter.dashboard'));
+
+    $response->assertOk()
+        ->assertViewHas('authorizedPatientsCount', 0)
+        ->assertViewHas('accessibleRecordsCount', 0)
+        ->assertViewHas('myLogsTotalCount', 0)
+        ->assertViewHas('myCreateLogsCount', 0)
+        ->assertViewHas('myUpdateLogsCount', 0)
+        ->assertViewHas('recentAuthorizedPatients', fn ($items): bool => $items->isEmpty())
+        ->assertViewHas('recentBlockchainLogs', fn ($items): bool => $items->isEmpty())
+        ->assertSee('Belum Terdaftar')
+        ->assertSee('0 CREATE • 0 UPDATE')
+        ->assertDontSee('Akun Belum Terdaftar On-Chain:')
+        ->assertDontSee('Budi Santoso')
+        ->assertDontSee('PAT001')
+        ->assertDontSee('MR777');
+
+    $deactivatedTx = '0x'.str_repeat('e', 64);
+    $unregistered['doctor']->update(['registration_tx_hash' => $deactivatedTx]);
+
+    $this->actingAs($unregistered['doctorUser'])
+        ->get(route('dokter.dashboard'))
+        ->assertOk()
+        ->assertViewHas('authorizedPatientsCount', 0)
+        ->assertViewHas('accessibleRecordsCount', 0)
+        ->assertViewHas('myLogsTotalCount', 0)
+        ->assertSee('Dinonaktifkan')
+        ->assertSee("https://sepolia.etherscan.io/tx/{$deactivatedTx}", false)
+        ->assertDontSee('MR777');
 });
 
 it('executes the 2-step prepare and store CREATE flow with receipt verification and receipt block_number', function () {

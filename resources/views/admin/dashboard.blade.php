@@ -79,7 +79,7 @@
     <div class="panel-card">
         <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
             <div>
-                <h2 class="h6 fw-bold mb-0">Log Aktivitas Blockchain Terbaru</h2>
+                <h2 class="h6 fw-bold mb-0">Aktivitas Blockchain Terbaru</h2>
             </div>
         </div>
 

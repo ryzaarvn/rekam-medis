@@ -35,7 +35,7 @@ class MedicalRecordController extends Controller
             ->orderBy('full_name')
             ->get();
 
-        return view('dokter.dashboard', [
+        return view('dokter.records.create', [
             'doctor' => $doctor,
             'authorizedPatients' => $authorizedPatients,
         ]);

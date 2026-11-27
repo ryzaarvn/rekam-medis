@@ -12,7 +12,7 @@
 @section('content')
     <div class="page-header">
         <h1 class="page-title">Riwayat Pemeriksaan</h1>
-        <a href="{{ route('dokter.dashboard') }}" class="btn btn-primary btn-sm fw-semibold">
+        <a href="{{ route('dokter.records.create') }}" class="btn btn-primary btn-sm fw-semibold">
             <i class="bi bi-plus-lg me-1"></i> Catat Pemeriksaan Baru
         </a>
     </div>

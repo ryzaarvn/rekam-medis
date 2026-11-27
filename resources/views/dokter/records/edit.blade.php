@@ -2,8 +2,8 @@
 
 @section('title', 'Edit Rekam Medis ' . $medicalRecord->record_code)
 @section('page', 'dokter-record-edit')
-@section('topbar_title', 'Portal Dokter')
-@section('user_display', $doctor->full_name . ' (' . $doctor->doctor_code . ')')
+@section('topbar_title', 'Panel Dokter')
+@section('user_display', $doctor->full_name)
 
 @section('sidebar')
     @include('dokter.partials.sidebar')

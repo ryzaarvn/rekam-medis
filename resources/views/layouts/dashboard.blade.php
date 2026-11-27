@@ -23,6 +23,14 @@
             <ul class="sidebar-menu">
                 @yield('sidebar')
             </ul>
+            <div class="sidebar-footer">
+                <form method="POST" action="{{ route('logout') }}">
+                    @csrf
+                    <button type="submit" class="sidebar-logout-btn">
+                        <i class="bi bi-box-arrow-left"></i> Keluar
+                    </button>
+                </form>
+            </div>
         </aside>
 
         <div class="main-panel">
@@ -75,6 +83,13 @@
                 @if (session('status'))
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
                         <i class="bi bi-check-circle-fill me-2"></i>{{ session('status') }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Tutup"></button>
+                    </div>
+                @endif
+
+                @if (session('success'))
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="bi bi-check-circle-fill me-2"></i>{{ session('success') }}
                         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Tutup"></button>
                     </div>
                 @endif

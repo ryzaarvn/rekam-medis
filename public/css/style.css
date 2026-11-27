@@ -19,7 +19,7 @@ html {
     font-family: 'Plus Jakarta Sans', sans-serif;
     background-color: var(--bg-content);
     color: var(--text-dark);
-    overflow-x: hidden;
+    overflow-x: clip;
 }
 
 /* =========================================================
@@ -191,6 +191,9 @@ html {
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
     transition: margin-left 0.2s ease;
 }
 
@@ -200,6 +203,7 @@ html {
 
 .sidebar-brand {
     height: 54px;
+    flex-shrink: 0;
     background-color: var(--primary-dark);
     color: #ffffff;
     display: flex;
@@ -214,10 +218,19 @@ html {
     list-style: none;
     padding: 12px 0;
     margin: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+}
+
+.sidebar-footer {
+    flex-shrink: 0;
+    margin-top: auto;
+    padding: 8px 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .sidebar-menu li a,
-.sidebar-menu li button.sidebar-logout-btn {
+.sidebar-logout-btn {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -235,7 +248,7 @@ html {
 }
 
 .sidebar-menu li a:hover,
-.sidebar-menu li button.sidebar-logout-btn:hover {
+.sidebar-logout-btn:hover {
     background-color: var(--sidebar-hover);
     color: #ffffff;
 }
@@ -456,6 +469,7 @@ html {
         top: 0;
         bottom: 0;
         left: 0;
+        height: auto;
         z-index: 1045;
         margin-left: -240px;
     }

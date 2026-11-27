@@ -1,7 +1,7 @@
 @extends('layouts.dashboard')
 
-@section('title', 'Catat Pemeriksaan')
-@section('page', 'dokter-record-create')
+@section('title', 'Dashboard Dokter')
+@section('page', 'dokter-dashboard')
 @section('topbar_title', 'Panel Dokter')
 @section('user_display', $doctor->full_name)
 
@@ -10,92 +10,219 @@
 @endsection
 
 @section('content')
-    <div style="max-width: 780px; margin: 0 auto;">
-        @if (!$doctor->is_registered_onchain)
-            <div class="alert alert-warning" role="alert">
-                <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                <strong>Akun Belum Terdaftar On-Chain:</strong> Admin belum mendaftarkan alamat wallet Anda ke smart contract
-                Sepolia. Hubungi Admin sebelum mencatat rekam medis.
+    @php
+        if ($doctor->is_registered_onchain) {
+            $onchainStatusLabel = 'Terdaftar';
+            $onchainStatusClass = 'text-success';
+            $onchainIcon = 'bi-patch-check';
+        } elseif ($doctor->registration_tx_hash !== null) {
+            $onchainStatusLabel = 'Dinonaktifkan';
+            $onchainStatusClass = 'text-warning';
+            $onchainIcon = 'bi-slash-circle';
+        } else {
+            $onchainStatusLabel = 'Belum Terdaftar';
+            $onchainStatusClass = 'text-secondary';
+            $onchainIcon = 'bi-hourglass-split';
+        }
+    @endphp
+
+    <div class="page-header">
+        <h1 class="page-title">Dashboard Dokter</h1>
+    </div>
+
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-4 g-3 mb-4">
+        <div class="col">
+            <div class="stat-card">
+                <div>
+                    <div class="stat-card-label">Status On-Chain</div>
+                    <div class="stat-card-value fs-5 {{ $onchainStatusClass }}">{{ $onchainStatusLabel }}</div>
+                    @if ($doctor->registration_tx_hash !== null)
+                        <div class="mt-1">
+                            <a href="https://sepolia.etherscan.io/tx/{{ $doctor->registration_tx_hash }}" target="_blank"
+                                rel="noopener noreferrer" class="small text-decoration-none"
+                                title="{{ $doctor->registration_tx_hash }}">
+                                <i class="bi bi-box-arrow-up-right me-1"></i>Tx Registrasi
+                            </a>
+                        </div>
+                    @endif
+                </div>
+                <div class="stat-card-icon {{ $onchainStatusClass }}">
+                    <i class="bi {{ $onchainIcon }}"></i>
+                </div>
             </div>
-        @endif
-
-        @if ($authorizedPatients->isEmpty())
-            <div class="alert alert-info" role="alert">
-                <i class="bi bi-info-circle-fill me-2"></i>
-                Belum ada pasien terdaftar on-chain yang memberikan izin akses kepada Anda saat ini.
-            </div>
-        @endif
-
-        <div id="dokterRecordAlert" class="alert d-none fs-6" role="alert"></div>
-
-        <div class="page-header">
-            <h1 class="page-title">Catatan Pemeriksaan Pasien</h1>
         </div>
 
-        <div class="panel-card p-4 elder-form">
-            <form id="dokterCreateRecordForm" data-prepare-url="{{ route('dokter.records.prepare') }}"
-                data-store-url="{{ route('dokter.records.store') }}">
-                <div class="row g-3 mb-3">
-                    <div class="col-md-7">
-                        <label for="patient_id" class="form-label">
-                            <i class="bi bi-person me-1 text-success"></i> Nama Pasien (Terotorisasi)
-                        </label>
-                        <select name="patient_id" id="patient_id" class="form-select" required>
-                            <option value="">-- Pilih Nama Pasien --</option>
-                            @foreach ($authorizedPatients as $patient)
-                                <option value="{{ $patient->id }}" data-wallet="{{ $patient->user->wallet_address }}"
-                                    @selected((string) old('patient_id') === (string) $patient->id)>
-                                    {{ $patient->full_name }} ({{ $patient->patient_code }})
-                                </option>
-                            @endforeach
-                        </select>
-                    </div>
-                    <div class="col-md-5">
-                        <label for="record_date" class="form-label">
-                            <i class="bi bi-calendar-event me-1 text-success"></i> Tanggal Periksa
-                        </label>
-                        <input type="date" name="record_date" id="record_date"
-                            value="{{ old('record_date', now()->toDateString()) }}" class="form-control" required>
-                    </div>
+        <div class="col">
+            <div class="stat-card">
+                <div>
+                    <div class="stat-card-label">Pasien Terotorisasi</div>
+                    <div class="stat-card-value">{{ $authorizedPatientsCount }}</div>
                 </div>
-
-                <div class="mb-3">
-                    <label for="complaint" class="form-label">
-                        <i class="bi bi-chat-left-text me-1 text-success"></i> Keluhan Pasien
-                    </label>
-                    <input type="text" name="complaint" id="complaint" class="form-control"
-                        placeholder="Tulis keluhan pasien..." required>
+                <div class="stat-card-icon">
+                    <i class="bi bi-people"></i>
                 </div>
-
-                <div class="mb-3">
-                    <label for="diagnosis" class="form-label">
-                        <i class="bi bi-clipboard2-pulse me-1 text-success"></i> Hasil Diagnosis
-                    </label>
-                    <input type="text" name="diagnosis" id="diagnosis" class="form-control"
-                        placeholder="Tulis hasil diagnosis dokter..." required>
-                </div>
-
-                <div class="mb-3">
-                    <label for="treatment" class="form-label">
-                        <i class="bi bi-capsule me-1 text-success"></i> Tindakan &amp; Obat
-                    </label>
-                    <input type="text" name="treatment" id="treatment" class="form-control"
-                        placeholder="Tulis tindakan atau obat yang diberikan..." required>
-                </div>
-
-                <div class="mb-4">
-                    <label for="notes" class="form-label">
-                        <i class="bi bi-pencil me-1 text-success"></i> Catatan
-                    </label>
-                    <textarea name="notes" id="notes" class="form-control" rows="2"
-                        placeholder="Contoh: Istirahat cukup dan kontrol 3 hari lagi"></textarea>
-                </div>
-
-                <button type="submit" id="btnSubmitCreateRecord" class="btn btn-primary btn-lg w-100 fw-bold py-3"
-                    @disabled(!$doctor->is_registered_onchain || $authorizedPatients->isEmpty())>
-                    <i class="bi bi-check-circle-fill me-2"></i> Simpan Rekam Medis
-                </button>
-            </form>
+            </div>
         </div>
+
+        <div class="col">
+            <div class="stat-card">
+                <div>
+                    <div class="stat-card-label">Rekam Medis Diakses</div>
+                    <div class="stat-card-value">{{ $accessibleRecordsCount }}</div>
+                </div>
+                <div class="stat-card-icon">
+                    <i class="bi bi-file-earmark-medical"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="col">
+            <div class="stat-card">
+                <div>
+                    <div class="stat-card-label">Transaksi Blockchain</div>
+                    <div class="stat-card-value">{{ $myLogsTotalCount }}</div>
+                </div>
+                <div class="stat-card-icon">
+                    <i class="bi bi-activity"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="panel-card">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div>
+                <h2 class="h6 fw-bold mb-0">Pasien Terotorisasi Aktif</h2>
+            </div>
+        </div>
+
+        @if ($recentAuthorizedPatients->isEmpty())
+            <div class="text-center py-4 text-muted small">
+                @if (!$doctor->is_registered_onchain)
+                    Data pasien terotorisasi tidak tersedia selama akun dokter belum aktif on-chain.
+                @else
+                    Belum ada pasien terdaftar on-chain yang memberikan izin akses aktif kepada Anda.
+                @endif
+            </div>
+        @else
+            <div class="table-responsive">
+                <table class="table table-custom mb-0">
+                    <thead>
+                        <tr>
+                            <th>Kode Pasien</th>
+                            <th>Nama Pasien</th>
+                            <th>Jenis Kelamin</th>
+                            <th>Alamat Wallet</th>
+                            <th>Tx Otorisasi</th>
+                            <th>Waktu Otorisasi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($recentAuthorizedPatients as $authorization)
+                            <tr>
+                                <td><strong>{{ $authorization->patient->patient_code }}</strong></td>
+                                <td class="fw-semibold">{{ $authorization->patient->full_name }}</td>
+                                <td>{{ $authorization->patient->gender }}</td>
+                                <td>
+                                    @if ($authorization->patient->user?->wallet_address)
+                                        <span class="hash-code" title="{{ $authorization->patient->user->wallet_address }}">
+                                            {{ substr($authorization->patient->user->wallet_address, 0, 8) }}...{{ substr($authorization->patient->user->wallet_address, -6) }}
+                                        </span>
+                                    @else
+                                        <span class="text-muted small">-</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    @if ($authorization->tx_hash)
+                                        <a href="https://sepolia.etherscan.io/tx/{{ $authorization->tx_hash }}" target="_blank"
+                                            rel="noopener noreferrer" class="btn btn-outline-primary btn-sm"
+                                            title="{{ $authorization->tx_hash }}">
+                                            <i class="bi bi-box-arrow-up-right me-1"></i>
+                                            {{ substr($authorization->tx_hash, 0, 8) }}...{{ substr($authorization->tx_hash, -6) }}
+                                        </a>
+                                    @else
+                                        <span class="text-muted small">-</span>
+                                    @endif
+                                </td>
+                                <td class="small text-nowrap">
+                                    {{ $authorization->updated_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i:s') }} WIB
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </div>
+
+    <div class="panel-card">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div>
+                <h2 class="h6 fw-bold mb-0">Aktivitas Blockchain Terbaru</h2>
+            </div>
+        </div>
+
+        @if ($recentBlockchainLogs->isEmpty())
+            <div class="text-center py-4 text-muted small">
+                @if (!$doctor->is_registered_onchain)
+                    Aktivitas transaksi blockchain tidak tersedia selama akun dokter belum aktif on-chain.
+                @else
+                    Belum ada log transaksi blockchain dari pasien terotorisasi.
+                @endif
+            </div>
+        @else
+            <div class="table-responsive">
+                <table class="table table-custom mb-0">
+                    <thead>
+                        <tr>
+                            <th>Waktu</th>
+                            <th>Kode RM</th>
+                            <th>Pasien</th>
+                            <th>Aksi</th>
+                            <th>Hash On-Chain</th>
+                            <th>Tx Hash</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($recentBlockchainLogs as $log)
+                            <tr>
+                                <td class="small text-nowrap">
+                                    {{ $log->created_at?->timezone('Asia/Jakarta')->format('Y-m-d H:i:s') }} WIB
+                                </td>
+                                <td><strong>{{ $log->medicalRecord?->record_code ?? '-' }}</strong></td>
+                                <td>
+                                    @if ($log->medicalRecord?->patient)
+                                        <div class="fw-semibold">{{ $log->medicalRecord->patient->full_name }}</div>
+                                        <div class="small text-muted">{{ $log->medicalRecord->patient->patient_code }}</div>
+                                    @else
+                                        <span class="text-muted">-</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    @if ($log->action_type === \App\Models\LogBlockchain::ACTION_CREATE)
+                                        <span class="badge bg-success">CREATE</span>
+                                    @else
+                                        <span class="badge bg-warning text-dark">UPDATE</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    <span class="hash-code" title="{{ $log->onchain_hash }}">
+                                        {{ substr($log->onchain_hash, 0, 10) }}...{{ substr($log->onchain_hash, -8) }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="https://sepolia.etherscan.io/tx/{{ $log->tx_hash }}" target="_blank"
+                                        rel="noopener noreferrer" class="btn btn-outline-primary btn-sm"
+                                        title="{{ $log->tx_hash }}">
+                                        <i class="bi bi-box-arrow-up-right me-1"></i>
+                                        {{ substr($log->tx_hash, 0, 8) }}...{{ substr($log->tx_hash, -6) }}
+                                    </a>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
     </div>
 @endsection

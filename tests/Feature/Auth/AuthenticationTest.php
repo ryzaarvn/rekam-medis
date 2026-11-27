@@ -120,3 +120,57 @@ it('redirects guests to login and forbids mismatched roles across protected port
     $this->actingAs($admin)->get(route('dokter.dashboard'))->assertForbidden();
     $this->actingAs($admin)->get(route('pasien.dashboard'))->assertForbidden();
 });
+
+it('renders the logout button in the sidebar footer for every role', function (string $role, string $dashboardRoute) {
+    $user = User::factory()->create([
+        'username' => 'sidebar_'.$role,
+        'role' => $role,
+        'wallet_address' => match ($role) {
+            User::ROLE_ADMIN => '0x42b01a713ea7a8eca09d36a9d8fa177ac301e1c3',
+            User::ROLE_DOKTER => '0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
+            User::ROLE_PASIEN => '0xb2c3d4e5f60718293a4b5c6d7e8f901234567890',
+        },
+    ]);
+
+    if ($role === User::ROLE_DOKTER) {
+        Doctor::create([
+            'doctor_code' => 'DOC901',
+            'user_id' => $user->id,
+            'full_name' => 'dr. Sidebar Test',
+            'specialization' => 'Umum',
+            'str_number' => 'STR-SIDEBAR-01',
+        ]);
+    }
+
+    if ($role === User::ROLE_PASIEN) {
+        Patient::create([
+            'patient_code' => 'PAT901',
+            'user_id' => $user->id,
+            'full_name' => 'Pasien Sidebar Test',
+            'date_of_birth' => '1995-01-01',
+            'gender' => Patient::GENDER_MALE,
+            'address' => 'Jl. Mawar',
+        ]);
+    }
+
+    $response = $this->actingAs($user)->get(route($dashboardRoute));
+
+    $response->assertOk();
+
+    $matched = preg_match(
+        '/<aside[^>]*id="appSidebar"[^>]*>.*?<ul[^>]*class="sidebar-menu"[^>]*>(.*?)<\/ul>\s*<div[^>]*class="sidebar-footer"[^>]*>(.*?)<\/div>\s*<\/aside>/s',
+        $response->getContent(),
+        $matches
+    );
+
+    expect($matched)->toBe(1)
+        ->and($matches[1])->not->toContain('sidebar-logout-btn')
+        ->and($matches[1])->not->toContain(route('logout'))
+        ->and($matches[2])->toContain('action="'.route('logout').'"')
+        ->and($matches[2])->toContain('class="sidebar-logout-btn"')
+        ->and($matches[2])->toContain('Keluar');
+})->with([
+    'admin' => [User::ROLE_ADMIN, 'admin.dashboard'],
+    'dokter' => [User::ROLE_DOKTER, 'dokter.dashboard'],
+    'pasien' => [User::ROLE_PASIEN, 'pasien.dashboard'],
+]);

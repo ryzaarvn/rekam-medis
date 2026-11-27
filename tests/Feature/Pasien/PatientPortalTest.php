@@ -277,7 +277,7 @@ it('warns and forbids granting or revoking access when the patient is not regist
     )->toBeTrue();
 });
 
-it('restricts patient dashboard medical records to the logged-in patient and hides other patients records', function () {
+it('restricts patient records page to the logged-in patient and hides other patients records', function () {
     $ctx = setupPatientPortalScenario();
     $service = app(BlockchainService::class);
 
@@ -315,8 +315,9 @@ it('restricts patient dashboard medical records to the logged-in patient and hid
     ]);
 
     $this->actingAs($ctx['patientUser'])
-        ->get(route('pasien.dashboard'))
+        ->get(route('pasien.records.index'))
         ->assertOk()
+        ->assertSee('data-page="pasien-records"', false)
         ->assertSee('MR001')
         ->assertSee('Dokter Terakhir')
         ->assertSee('&lt;script&gt;', false)
@@ -327,6 +328,218 @@ it('restricts patient dashboard medical records to the logged-in patient and hid
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.records.verify', $otherRecord))
         ->assertNotFound();
+});
+
+it('displays clean summary cards, active doctors, and isolated recent records on the patient dashboard without shortcut buttons', function () {
+    $ctx = setupPatientPortalScenario();
+    $service = app(BlockchainService::class);
+
+    $revokedDoctorUser = User::factory()->dokter()->create([
+        'username' => 'dr_dicabut',
+        'wallet_address' => '0xf1e2d3c4b5a69788796a5b4c3d2e1f0011223344',
+    ]);
+    $revokedDoctor = Doctor::create([
+        'doctor_code' => 'DOC003',
+        'user_id' => $revokedDoctorUser->id,
+        'full_name' => 'Dr. Izin Dicabut',
+        'specialization' => 'Saraf',
+        'str_number' => 'STR-2026-0003',
+        'is_registered_onchain' => true,
+        'registration_tx_hash' => '0x'.str_repeat('2', 64),
+    ]);
+
+    $activeAuthTx = '0x'.str_repeat('3', 64);
+    $revokedAuthTx = '0x'.str_repeat('4', 64);
+    $pendingAuthTx = '0x'.str_repeat('5', 64);
+
+    Authorization::create([
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'is_authorized' => true,
+        'tx_hash' => $activeAuthTx,
+    ]);
+
+    Authorization::create([
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $revokedDoctor->id,
+        'is_authorized' => false,
+        'tx_hash' => $revokedAuthTx,
+    ]);
+
+    Authorization::create([
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $ctx['pendingDoctor']->id,
+        'is_authorized' => true,
+        'tx_hash' => $pendingAuthTx,
+    ]);
+
+    $olderRecord = MedicalRecord::create([
+        'record_code' => 'MR001',
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $revokedDoctor->id,
+        'record_date' => '2026-11-20',
+        'complaint' => 'Flu',
+        'diagnosis' => 'Influenza ringan',
+        'treatment' => 'Vitamin',
+        'current_hash' => $service->hashMedicalRecord([
+            'record_code' => 'MR001',
+            'patient_code' => $ctx['patient']->patient_code,
+            'doctor_code' => $revokedDoctor->doctor_code,
+            'record_date' => '2026-11-20',
+            'complaint' => 'Flu',
+            'diagnosis' => 'Influenza ringan',
+            'treatment' => 'Vitamin',
+            'notes' => null,
+        ]),
+    ]);
+
+    $latestHash = $service->hashMedicalRecord([
+        'record_code' => 'MR002',
+        'patient_code' => $ctx['patient']->patient_code,
+        'doctor_code' => $ctx['activeDoctor']->doctor_code,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Batuk',
+        'diagnosis' => 'ISPA <script>alert("xss")</script>',
+        'treatment' => 'Istirahat',
+        'notes' => null,
+    ]);
+
+    $latestRecord = MedicalRecord::create([
+        'record_code' => 'MR002',
+        'patient_id' => $ctx['patient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'record_date' => '2026-11-26',
+        'complaint' => 'Batuk',
+        'diagnosis' => 'ISPA <script>alert("xss")</script>',
+        'treatment' => 'Istirahat',
+        'current_hash' => $latestHash,
+    ]);
+
+    $latestRecordTx = '0x'.str_repeat('6', 64);
+    LogBlockchain::create([
+        'medical_record_id' => $latestRecord->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'onchain_hash' => $latestHash,
+        'tx_hash' => $latestRecordTx,
+        'block_number' => 7000300,
+        'action_type' => LogBlockchain::ACTION_CREATE,
+    ]);
+
+    MedicalRecord::create([
+        'record_code' => 'MR999',
+        'patient_id' => $ctx['otherPatient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'record_date' => '2026-11-27',
+        'complaint' => 'Keluhan rahasia',
+        'diagnosis' => 'Diagnosis rahasia pasien lain',
+        'treatment' => 'Obat rahasia',
+        'current_hash' => '0x'.str_repeat('f', 64),
+    ]);
+
+    $response = $this->actingAs($ctx['patientUser'])->get(route('pasien.dashboard'));
+
+    $response->assertOk()
+        ->assertViewIs('pasien.dashboard')
+        ->assertViewHas('totalRecordsCount', 2)
+        ->assertViewHas('authorizedDoctorsCount', 1)
+        ->assertSee('data-page="pasien-dashboard"', false)
+        ->assertSee('Status On-Chain')
+        ->assertSee('Terdaftar')
+        ->assertSee('PAT001')
+        ->assertSee('Dokter Berizin Aktif')
+        ->assertSee('Pemeriksaan Terakhir')
+        ->assertSee('2026-11-26')
+        ->assertSee('Dokter Terakhir: Dr. Andi Wijaya')
+        ->assertSee('Dokter dengan Akses Aktif')
+        ->assertSee('DOC001')
+        ->assertSee('Dr. Andi Wijaya')
+        ->assertSee("https://sepolia.etherscan.io/tx/{$activeAuthTx}", false)
+        ->assertSee("https://sepolia.etherscan.io/tx/{$latestRecordTx}", false)
+        ->assertSee('MR001')
+        ->assertSee('MR002')
+        ->assertSee('&lt;script&gt;', false)
+        ->assertDontSee('<script>alert("xss")</script>', false)
+        ->assertDontSee('Dr. Belum Onchain')
+        ->assertDontSee($revokedAuthTx, false)
+        ->assertDontSee($pendingAuthTx, false)
+        ->assertDontSee('MR999')
+        ->assertDontSee('Diagnosis rahasia pasien lain');
+
+    $matchedPanels = preg_match(
+        '/Dokter dengan Akses Aktif<\/h2>(.*?)Rekam Medis Terbaru<\/h2>(.*?)<\/main>/s',
+        $response->getContent(),
+        $panelMatches,
+    );
+    expect($matchedPanels)->toBe(1)
+        ->and($panelMatches[1])->toContain('DOC001')
+        ->and($panelMatches[1])->toContain('Dr. Andi Wijaya')
+        ->and($panelMatches[1])->toContain($activeAuthTx)
+        ->and($panelMatches[1])->not->toContain('Dr. Izin Dicabut')
+        ->and($panelMatches[1])->not->toContain('DOC003')
+        ->and($panelMatches[1])->not->toContain('Dr. Belum Onchain')
+        ->and($panelMatches[1])->not->toContain('DOC002')
+        ->and($panelMatches[1])->not->toContain($revokedAuthTx)
+        ->and($panelMatches[1])->not->toContain($pendingAuthTx)
+        ->and($panelMatches[2])->toContain('MR001')
+        ->and($panelMatches[2])->toContain('MR002')
+        ->and($panelMatches[2])->toContain('&lt;script&gt;')
+        ->and($panelMatches[2])->not->toContain('MR999')
+        ->and($panelMatches[2])->not->toContain('Diagnosis rahasia pasien lain');
+
+    $matchedSidebar = preg_match('/<aside[^>]*id="appSidebar"[^>]*>(.*?)<\/aside>/s', $response->getContent(), $sidebarMatches);
+    expect($matchedSidebar)->toBe(1)
+        ->and($sidebarMatches[1])->toContain('<a href="'.route('pasien.dashboard').'" class="active">')
+        ->and($sidebarMatches[1])->toContain(route('pasien.records.index'))
+        ->and($sidebarMatches[1])->toContain(route('pasien.authorizations.index'))
+        ->and($sidebarMatches[1])->toContain(route('account.edit'));
+
+    $matchedMain = preg_match('/<main[^>]*class="content-area"[^>]*>(.*?)<\/main>/s', $response->getContent(), $mainMatches);
+    expect($matchedMain)->toBe(1)
+        ->and($mainMatches[1])->not->toContain(route('pasien.records.index'))
+        ->and($mainMatches[1])->not->toContain(route('pasien.authorizations.index'))
+        ->and($mainMatches[1])->not->toContain(route('account.edit'))
+        ->and($mainMatches[1])->not->toContain('Kelola Izin')
+        ->and($mainMatches[1])->not->toContain('Cabut Izin')
+        ->and($mainMatches[1])->not->toContain('Lihat Semua')
+        ->and($mainMatches[1])->not->toContain('Detail')
+        ->and($mainMatches[1])->not->toContain('Verifikasi');
+});
+
+it('shows zero active authorized doctors and empty active doctors table when the patient is not registered on-chain', function () {
+    $ctx = setupPatientPortalScenario();
+
+    Authorization::create([
+        'patient_id' => $ctx['unregisteredPatient']->id,
+        'doctor_id' => $ctx['activeDoctor']->id,
+        'is_authorized' => true,
+        'tx_hash' => '0x'.str_repeat('a', 64),
+    ]);
+
+    $response = $this->actingAs($ctx['unregisteredPatientUser'])->get(route('pasien.dashboard'));
+
+    $response->assertOk()
+        ->assertViewHas('totalRecordsCount', 0)
+        ->assertViewHas('authorizedDoctorsCount', 0)
+        ->assertViewHas('activeAuthorizations', fn ($items): bool => $items->isEmpty())
+        ->assertViewHas('recentRecords', fn ($items): bool => $items->isEmpty())
+        ->assertSee('Belum Terdaftar')
+        ->assertSee('PAT003')
+        ->assertSee('Belum ada pemeriksaan')
+        ->assertDontSee('Akun Belum Terdaftar On-Chain:')
+        ->assertDontSee('Dr. Andi Wijaya')
+        ->assertDontSee('DOC001');
+
+    $deactivatedTx = '0x'.str_repeat('e', 64);
+    $ctx['unregisteredPatient']->update(['registration_tx_hash' => $deactivatedTx]);
+
+    $this->actingAs($ctx['unregisteredPatientUser'])
+        ->get(route('pasien.dashboard'))
+        ->assertOk()
+        ->assertViewHas('authorizedDoctorsCount', 0)
+        ->assertViewHas('activeAuthorizations', fn ($items): bool => $items->isEmpty())
+        ->assertSee('Dinonaktifkan')
+        ->assertSee("https://sepolia.etherscan.io/tx/{$deactivatedTx}", false)
+        ->assertDontSee('Dr. Andi Wijaya');
 });
 
 it('verifies a VALID medical record using a single getMedicalRecord eth_call when hashes and patient wallet match', function () {
