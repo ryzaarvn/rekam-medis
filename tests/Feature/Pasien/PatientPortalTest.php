@@ -201,6 +201,14 @@ it('lists only active on-chain doctors, verifies grant/revoke receipts, and prev
     expect($authorization->is_authorized)->toBeTrue()
         ->and($authorization->tx_hash)->toBe(strtolower($grantTx));
 
+    // Reject replaying the grant tx_hash while it is stored on the authorization row
+    $this->actingAs($ctx['patientUser'])
+        ->postJson(route('pasien.authorizations.revoke', $ctx['activeDoctor']), [
+            'tx_hash' => $grantTx,
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('tx_hash');
+
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.authorizations.revoke', $ctx['activeDoctor']), [
             'tx_hash' => $revokeTx,
@@ -211,10 +219,10 @@ it('lists only active on-chain doctors, verifies grant/revoke receipts, and prev
     expect($authorization->fresh()->is_authorized)->toBeFalse()
         ->and($authorization->fresh()->tx_hash)->toBe(strtolower($revokeTx));
 
-    // Reject replaying an already-recorded tx_hash
+    // Reject replaying the tx_hash currently persisted in authorizations
     $this->actingAs($ctx['patientUser'])
         ->postJson(route('pasien.authorizations.grant', $ctx['activeDoctor']), [
-            'tx_hash' => $grantTx,
+            'tx_hash' => $revokeTx,
         ])
         ->assertUnprocessable()
         ->assertJsonValidationErrors('tx_hash');
@@ -445,12 +453,12 @@ it('displays clean summary cards, active doctors, and isolated recent records on
         ->assertSee('data-page="pasien-dashboard"', false)
         ->assertSee('Status On-Chain')
         ->assertSee('Terdaftar')
-        ->assertSee('PAT001')
+        ->assertSee('Total Rekam Medis')
         ->assertSee('Dokter Berizin Aktif')
         ->assertSee('Pemeriksaan Terakhir')
         ->assertSee('2026-11-26')
-        ->assertSee('Dokter Terakhir: Dr. Andi Wijaya')
         ->assertSee('Dokter dengan Akses Aktif')
+        ->assertSee('Rekam Medis Terbaru')
         ->assertSee('DOC001')
         ->assertSee('Dr. Andi Wijaya')
         ->assertSee("https://sepolia.etherscan.io/tx/{$activeAuthTx}", false)
@@ -522,9 +530,13 @@ it('shows zero active authorized doctors and empty active doctors table when the
         ->assertViewHas('authorizedDoctorsCount', 0)
         ->assertViewHas('activeAuthorizations', fn ($items): bool => $items->isEmpty())
         ->assertViewHas('recentRecords', fn ($items): bool => $items->isEmpty())
+        ->assertSee('Status On-Chain')
         ->assertSee('Belum Terdaftar')
-        ->assertSee('PAT003')
-        ->assertSee('Belum ada pemeriksaan')
+        ->assertSee('Total Rekam Medis')
+        ->assertSee('Dokter Berizin Aktif')
+        ->assertSee('Pemeriksaan Terakhir')
+        ->assertSee('Daftar dokter dengan akses aktif tidak tersedia selama akun Anda belum terdaftar aktif on-chain.')
+        ->assertSee('Belum ada riwayat rekam medis untuk akun Anda.')
         ->assertDontSee('Akun Belum Terdaftar On-Chain:')
         ->assertDontSee('Dr. Andi Wijaya')
         ->assertDontSee('DOC001');

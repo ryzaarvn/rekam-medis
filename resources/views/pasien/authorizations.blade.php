@@ -18,8 +18,7 @@
         @if (!$patient->is_registered_onchain)
             <div class="alert alert-warning" role="alert">
                 <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                <strong>Akun Belum Terdaftar On-Chain:</strong> Wallet Anda belum terdaftar/aktif di blockchain Sepolia. Hubungi
-                Admin untuk registrasi on-chain sebelum mengatur izin dokter.
+                <strong>Akun Belum Terdaftar On-Chain:</strong> Wallet Anda belum terdaftar/aktif di blockchain Sepolia. Hubungi Admin untuk registrasi on-chain sebelum mengatur izin dokter.
             </div>
         @endif
 

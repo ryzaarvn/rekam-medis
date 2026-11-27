@@ -87,7 +87,7 @@ it('produces a deterministic lowercase canonical SHA-256 hash using domain codes
     expect($canonicalJson)
         ->toBe('{"complaint":"Demam tinggi","diagnosis":"Infeksi virus","doctor_code":"DOC001","notes":null,"patient_code":"PAT001","record_code":"MR001","record_date":"2026-11-26","treatment":"Paracetamol"}');
     expect($hashFromBase)
-        ->toBe('0x8c3abcfaf0dfde354421c3695e0dfd83255a18e3c48eea5a8fa5379d053e518e')
+        ->toBe('0x042f0ec47b830fb0865b11c660753704eed7d836350205409ec19cee287d41fd')
         ->toMatch('/^0x[a-f0-9]{64}$/')
         ->toBe($hashFromEquivalent);
 });

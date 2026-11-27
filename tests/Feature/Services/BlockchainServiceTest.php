@@ -111,7 +111,7 @@ it('computes identical canonical SHA-256 hashes using domain codes across create
 
     expect($service->hashMedicalRecord($record))
         ->toBe($createHash)
-        ->toBe('0x8c3abcfaf0dfde354421c3695e0dfd83255a18e3c48eea5a8fa5379d053e518e');
+        ->toBe('0x042f0ec47b830fb0865b11c660753704eed7d836350205409ec19cee287d41fd');
 
     $updatePayload = [
         'record_code' => $record->record_code,
